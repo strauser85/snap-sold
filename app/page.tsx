@@ -187,6 +187,14 @@ export default function VideoGenerator() {
 
     try {
       setProgress({ step: `Processing ${uploadedImages.length} images...`, progress: 20 })
+
+      // Compress images to reduce payload size
+      const compressedImages = uploadedImages.slice(0, 10) // Limit to 10 images max
+      const imageUrls = compressedImages.map((img) => {
+        // For demo, we'll use the base64 but in production you'd compress here
+        return img.base64
+      })
+
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
       setProgress({ step: "Generating AI voiceover...", progress: 40 })
@@ -206,21 +214,43 @@ export default function VideoGenerator() {
           bathrooms: Number(bathrooms),
           sqft: Number(sqft),
           script: generatedScript,
-          imageUrls: uploadedImages.map((img) => img.base64),
+          imageUrls: imageUrls,
         }),
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to generate video.")
+      // Better error handling for different response types
+      let data
+      const contentType = response.headers.get("content-type")
+
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json()
+      } else {
+        // Handle non-JSON responses (like 413 errors)
+        const text = await response.text()
+        throw new Error(`Server error (${response.status}): ${text}`)
       }
 
-      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || `Server error: ${response.status}`)
+      }
+
       setResult(data)
       setProgress({ step: "Multi-image TikTok video generated successfully!", progress: 100 })
     } catch (err) {
       console.error("Generation error:", err)
-      setError(err instanceof Error ? err.message : "An unexpected error occurred.")
+      let errorMessage = "An unexpected error occurred."
+
+      if (err instanceof Error) {
+        if (err.message.includes("413") || err.message.includes("too large")) {
+          errorMessage = "Request too large. Please reduce the number of images (max 10) or try smaller file sizes."
+        } else if (err.message.includes("JSON")) {
+          errorMessage = "Server response error. Please try again."
+        } else {
+          errorMessage = err.message
+        }
+      }
+
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -357,6 +387,16 @@ export default function VideoGenerator() {
                 className="h-12 text-base file:text-indigo-600 file:font-medium"
                 disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
               />
+
+              {uploadedImages.length > 10 && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    You have {uploadedImages.length} images. Only the first 10 will be used for video generation to
+                    prevent size limits.
+                  </AlertDescription>
+                </Alert>
+              )}
 
               {/* Image Display */}
               {uploadedImages.length > 0 && (

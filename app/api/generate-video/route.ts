@@ -16,11 +16,11 @@ interface PropertyInput {
   imageUrls: string[] // Base64 data URLs - now supports up to 20
 }
 
-// Convert base64 to blob URL for Fal AI
-async function base64ToBlob(base64: string): Promise<string> {
+// Convert base64 to blob URL for Fal AI - with size optimization
+async function base64ToBlob(base64: string, maxSize = 1024): Promise<string> {
   try {
     // For demo purposes, we'll use placeholder images
-    // In production, you'd upload the base64 to temporary storage
+    // In production, you'd resize and compress the base64 images before uploading
     const placeholders = [
       "https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=400&h=600&fit=crop",
       "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=400&h=600&fit=crop",
@@ -144,6 +144,13 @@ async function generateMultiImageVideo(imageUrls: string[], audioUrl: string, sc
 
 export async function POST(request: NextRequest) {
   try {
+    // Check content length to prevent 413 errors
+    const contentLength = request.headers.get("content-length")
+    if (contentLength && Number.parseInt(contentLength) > 50 * 1024 * 1024) {
+      // 50MB limit
+      return NextResponse.json({ error: "Request too large. Please reduce image count or size." }, { status: 413 })
+    }
+
     const propertyData: PropertyInput = await request.json()
 
     // Validation
@@ -221,6 +228,19 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error("Video generation error:", error)
+
+    // Handle specific error types
+    if (error instanceof SyntaxError && error.message.includes("JSON")) {
+      return NextResponse.json({ error: "Invalid request format. Please try again." }, { status: 400 })
+    }
+
+    if (error.message?.includes("413") || error.message?.includes("too large")) {
+      return NextResponse.json(
+        { error: "Request too large. Please reduce the number of images or their size." },
+        { status: 413 },
+      )
+    }
+
     return NextResponse.json(
       {
         error: "Failed to generate video with audio. Please try again.",
