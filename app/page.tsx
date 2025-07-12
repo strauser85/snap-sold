@@ -19,6 +19,7 @@ import {
   Grid3X3,
   List,
   Info,
+  FileText,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
 
@@ -48,6 +49,7 @@ export default function VideoGenerator() {
   const [bedrooms, setBedrooms] = useState<number | string>("")
   const [bathrooms, setBathrooms] = useState<number | string>("")
   const [sqft, setSqft] = useState<number | string>("")
+  const [propertyDescription, setPropertyDescription] = useState("")
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [generatedScript, setGeneratedScript] = useState("")
   const [imageViewMode, setImageViewMode] = useState<"grid" | "list">("grid")
@@ -143,6 +145,7 @@ export default function VideoGenerator() {
           bedrooms: Number(bedrooms),
           bathrooms: Number(bathrooms),
           sqft: Number(sqft),
+          propertyDescription: propertyDescription.trim(),
           imageCount: uploadedImages.length,
         }),
       })
@@ -165,7 +168,14 @@ export default function VideoGenerator() {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
       // Fallback to basic script if API completely fails
-      const basicScript = `🏡 Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of luxurious living space. Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity you won't want to miss! Schedule a tour today! 📞✨`
+      let basicScript = `🏡 Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of luxurious living space.`
+
+      // Include property description in fallback if provided
+      if (propertyDescription.trim()) {
+        basicScript += ` ${propertyDescription.trim()}`
+      }
+
+      basicScript += ` Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity you won't want to miss! Schedule a tour today! 📞✨`
 
       setGeneratedScript(basicScript)
       setScriptMethod("emergency")
@@ -189,18 +199,15 @@ export default function VideoGenerator() {
       setProgress({ step: `Processing ${uploadedImages.length} images...`, progress: 20 })
 
       // Compress images to reduce payload size
-      const compressedImages = uploadedImages.slice(0, 10) // Limit to 10 images max
-      const imageUrls = compressedImages.map((img) => {
-        // For demo, we'll use the base64 but in production you'd compress here
-        return img.base64
-      })
+      const compressedImages = uploadedImages.slice(0, 5) // Limit to 5 images max for better reliability
+      const imageUrls = compressedImages.map((img) => img.base64)
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      setProgress({ step: "Generating AI voiceover...", progress: 40 })
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      setProgress({ step: "Generating AI voiceover with your custom details...", progress: 40 })
+      await new Promise((resolve) => setTimeout(resolve, 2000))
 
-      setProgress({ step: "Creating multi-image TikTok video...", progress: 60 })
+      setProgress({ step: "Creating TikTok video with your images...", progress: 70 })
 
       const response = await fetch("/api/generate-video", {
         method: "POST",
@@ -213,6 +220,7 @@ export default function VideoGenerator() {
           bedrooms: Number(bedrooms),
           bathrooms: Number(bathrooms),
           sqft: Number(sqft),
+          propertyDescription: propertyDescription.trim(),
           script: generatedScript,
           imageUrls: imageUrls,
         }),
@@ -225,26 +233,37 @@ export default function VideoGenerator() {
       if (contentType && contentType.includes("application/json")) {
         data = await response.json()
       } else {
-        // Handle non-JSON responses (like 413 errors)
+        // Handle non-JSON responses
         const text = await response.text()
-        throw new Error(`Server error (${response.status}): ${text}`)
+        console.error("Non-JSON response:", text)
+        throw new Error(`Server error (${response.status}): Please try again in a few moments.`)
       }
 
       if (!response.ok) {
-        throw new Error(data.error || `Server error: ${response.status}`)
+        // Handle specific error cases
+        if (response.status === 500 && data.error?.includes("voiceover")) {
+          throw new Error("AI voiceover service is temporarily unavailable. Please try again in a few minutes.")
+        } else if (response.status === 413) {
+          throw new Error("Request too large. Please use fewer or smaller images.")
+        } else {
+          throw new Error(data.error || `Server error: ${response.status}`)
+        }
       }
 
       setResult(data)
-      setProgress({ step: "Multi-image TikTok video generated successfully!", progress: 100 })
+      setProgress({ step: "TikTok video with custom voiceover generated successfully!", progress: 100 })
     } catch (err) {
       console.error("Generation error:", err)
       let errorMessage = "An unexpected error occurred."
 
       if (err instanceof Error) {
-        if (err.message.includes("413") || err.message.includes("too large")) {
-          errorMessage = "Request too large. Please reduce the number of images (max 10) or try smaller file sizes."
+        if (err.message.includes("voiceover")) {
+          errorMessage =
+            "AI voiceover generation failed. The service may be temporarily unavailable. Please try again in a few minutes."
+        } else if (err.message.includes("413") || err.message.includes("too large")) {
+          errorMessage = "Request too large. Please reduce the number of images (max 5) or try smaller file sizes."
         } else if (err.message.includes("JSON")) {
-          errorMessage = "Server response error. Please try again."
+          errorMessage = "Server communication error. Please try again."
         } else {
           errorMessage = err.message
         }
@@ -262,6 +281,7 @@ export default function VideoGenerator() {
     setBedrooms("")
     setBathrooms("")
     setSqft("")
+    setPropertyDescription("")
     setGeneratedScript("")
     setScriptMethod("")
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl))
@@ -361,6 +381,36 @@ export default function VideoGenerator() {
               </div>
             </div>
 
+            {/* Property Description Field */}
+            <div className="space-y-2">
+              <Label
+                htmlFor="property-description"
+                className="text-sm font-medium text-gray-700 flex items-center gap-2"
+              >
+                <FileText className="h-4 w-4" />
+                Property Description & Key Features (Optional)
+              </Label>
+              <Textarea
+                id="property-description"
+                value={propertyDescription}
+                onChange={(e) => setPropertyDescription(e.target.value)}
+                placeholder="Describe unique features, amenities, recent upgrades, neighborhood highlights, or anything special you want emphasized in the voiceover... 
+
+Examples:
+• Recently renovated kitchen with granite countertops
+• Walking distance to top-rated schools
+• Private backyard with pool and deck
+• Smart home features throughout
+• Quiet cul-de-sac location"
+                className="min-h-[100px] text-base"
+                disabled={isLoading}
+              />
+              <p className="text-xs text-gray-500">
+                This description will be incorporated into your AI-generated script and voiceover to highlight what
+                makes this property special.
+              </p>
+            </div>
+
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Label htmlFor="images" className="text-sm font-medium text-gray-700">
@@ -388,12 +438,12 @@ export default function VideoGenerator() {
                 disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
               />
 
-              {uploadedImages.length > 10 && (
+              {uploadedImages.length > 5 && (
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>
-                    You have {uploadedImages.length} images. Only the first 10 will be used for video generation to
-                    prevent size limits.
+                    You have {uploadedImages.length} images. Only the first 5 will be used for video generation to
+                    ensure reliability and prevent timeouts.
                   </AlertDescription>
                 </Alert>
               )}
@@ -490,10 +540,10 @@ export default function VideoGenerator() {
                   {scriptMethod && (
                     <span className="ml-2 text-xs text-gray-500">
                       (
-                      {scriptMethod === "AI"
-                        ? "AI-powered"
+                      {scriptMethod === "OpenAI"
+                        ? "AI-powered with custom details"
                         : scriptMethod === "fallback"
-                          ? "Smart template"
+                          ? "Smart template with custom details"
                           : "Basic template"}
                       )
                     </span>
@@ -523,7 +573,7 @@ export default function VideoGenerator() {
                 id="generated-script"
                 value={generatedScript}
                 onChange={(e) => setGeneratedScript(e.target.value)}
-                placeholder="Click 'Generate Script' to create an AI-powered TikTok script, or write your own..."
+                placeholder="Click 'Generate Script' to create an AI-powered TikTok script that incorporates your property description, or write your own..."
                 className="min-h-[120px] text-base"
                 disabled={isLoading}
               />
@@ -531,7 +581,17 @@ export default function VideoGenerator() {
                 <Alert>
                   <Info className="h-4 w-4" />
                   <AlertDescription>
-                    AI generation unavailable - using smart template. You can edit the script above.
+                    AI generation unavailable - using smart template with your custom details. You can edit the script
+                    above.
+                  </AlertDescription>
+                </Alert>
+              )}
+              {propertyDescription && scriptMethod && (
+                <Alert>
+                  <CheckCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Your property description has been incorporated into the script and will be included in the
+                    voiceover.
                   </AlertDescription>
                 </Alert>
               )}
@@ -554,7 +614,7 @@ export default function VideoGenerator() {
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating Multi-Image TikTok Video...
+                  Creating Custom TikTok Video...
                 </>
               ) : (
                 `Generate TikTok Video (${uploadedImages.length} images)`
@@ -605,7 +665,7 @@ export default function VideoGenerator() {
                     )}
                     <div className="absolute bottom-4 left-4 right-4 text-white">
                       <p className="text-sm font-medium">{result.listing.address}</p>
-                      <p className="text-xs opacity-80">Multi-image TikTok video ready!</p>
+                      <p className="text-xs opacity-80">Custom TikTok video with personalized voiceover!</p>
                     </div>
                   </div>
 
@@ -628,8 +688,8 @@ export default function VideoGenerator() {
                           <p className="text-gray-600">{uploadedImages.length} photos</p>
                         </div>
                         <div>
-                          <p className="font-medium text-gray-700">Duration:</p>
-                          <p className="text-gray-600">{result.metadata?.duration}</p>
+                          <p className="font-medium text-gray-700">Custom Features:</p>
+                          <p className="text-gray-600">{propertyDescription ? "Included" : "None"}</p>
                         </div>
                       </div>
                     </div>
@@ -654,7 +714,7 @@ export default function VideoGenerator() {
                   <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     <Play className="h-6 w-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500">Your multi-image TikTok video will appear here</p>
+                  <p className="text-sm text-gray-500">Your custom TikTok video will appear here</p>
                 </div>
               )}
             </div>

@@ -6,12 +6,13 @@ interface PropertyData {
   bedrooms: number
   bathrooms: number
   sqft: number
+  propertyDescription?: string
   imageCount?: number
 }
 
 // Fallback script templates for when AI fails
 const generateFallbackScript = (data: PropertyData): string => {
-  const { address, price, bedrooms, bathrooms, sqft, imageCount = 1 } = data
+  const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount = 1 } = data
 
   const priceFormatted = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -47,6 +48,12 @@ const generateFallbackScript = (data: PropertyData): string => {
   let script = `${hook}\n\n`
   script += `Welcome to ${address}! `
   script += `${middle}\n\n`
+
+  // Include property description if provided
+  if (propertyDescription && propertyDescription.trim()) {
+    script += `But wait, there's more! ${propertyDescription.trim()}\n\n`
+  }
+
   script += `Priced at ${priceFormatted}, this property is an incredible opportunity! `
 
   if (imageCount > 5) {
@@ -60,7 +67,7 @@ const generateFallbackScript = (data: PropertyData): string => {
 
 // OpenAI API function
 async function generateOpenAIScript(propertyData: PropertyData): Promise<string> {
-  const { address, price, bedrooms, bathrooms, sqft, imageCount = 1 } = propertyData
+  const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount = 1 } = propertyData
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -80,13 +87,14 @@ async function generateOpenAIScript(propertyData: PropertyData): Promise<string>
 3. Highlight key selling points and lifestyle benefits
 4. Include emotional triggers and investment potential
 5. Reference multiple property features since we have ${imageCount} images to showcase
-6. End with a strong call-to-action
-7. Are 45-60 seconds when spoken (about 150-200 words for ${imageCount} images)
-8. Use casual, energetic TikTok language with strategic pauses
-9. Include relevant emojis and power words
-10. Create anticipation for each room/feature reveal
+6. IMPORTANTLY: Incorporate any custom property description/features provided by the user naturally into the script
+7. End with a strong call-to-action
+8. Are 45-60 seconds when spoken (about 150-200 words for ${imageCount} images)
+9. Use casual, energetic TikTok language with strategic pauses
+10. Include relevant emojis and power words
+11. Create anticipation for each room/feature reveal
 
-The script should feel authentic and exciting, not salesy. Focus on lifestyle transformation and investment opportunity.`,
+The script should feel authentic and exciting, not salesy. Focus on lifestyle transformation and investment opportunity. If custom property details are provided, weave them seamlessly into the narrative to highlight what makes this property unique.`,
         },
         {
           role: "user",
@@ -98,6 +106,15 @@ Bedrooms: ${bedrooms}
 Bathrooms: ${bathrooms}
 Square Feet: ${sqft.toLocaleString()}
 Images Available: ${imageCount} photos
+
+${
+  propertyDescription && propertyDescription.trim()
+    ? `IMPORTANT - Custom Property Features to Highlight:
+${propertyDescription.trim()}
+
+Please incorporate these specific features and details naturally into the script to emphasize what makes this property special.`
+    : ""
+}
 
 Make it compelling for potential buyers and investors with hooks, benefits, urgency, and strong call-to-action.`,
         },
@@ -121,14 +138,17 @@ export async function POST(request: NextRequest) {
     const propertyData: PropertyData = await request.json()
 
     console.log("Generating script for:", propertyData.address)
+    if (propertyData.propertyDescription) {
+      console.log("Including custom property description:", propertyData.propertyDescription.substring(0, 100) + "...")
+    }
 
     // First try OpenAI API if key is available
     if (process.env.OPENAI_API_KEY) {
       try {
-        console.log("Using OpenAI API for script generation...")
+        console.log("Using OpenAI API for script generation with custom details...")
         const script = await generateOpenAIScript(propertyData)
 
-        console.log("OpenAI script generated successfully")
+        console.log("OpenAI script with custom details generated successfully")
         return NextResponse.json({
           success: true,
           script: script,
@@ -144,7 +164,7 @@ export async function POST(request: NextRequest) {
     // Use fallback script generation
     const fallbackScript = generateFallbackScript(propertyData)
 
-    console.log("Fallback script generated successfully")
+    console.log("Fallback script with custom details generated successfully")
     return NextResponse.json({
       success: true,
       script: fallbackScript,

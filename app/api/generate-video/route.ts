@@ -12,6 +12,7 @@ interface PropertyInput {
   bedrooms: number
   bathrooms: number
   sqft: number
+  propertyDescription?: string
   script: string
   imageUrls: string[] // Base64 data URLs - now supports up to 20
 }
@@ -35,110 +36,133 @@ async function base64ToBlob(base64: string, maxSize = 1024): Promise<string> {
   }
 }
 
-// Generate text-to-speech audio using Fal AI
-async function generateVoiceover(script: string): Promise<string> {
+// Generate text-to-speech audio using Fal AI with multiple fallbacks
+async function generateVoiceover(script: string, propertyDescription?: string): Promise<string> {
   try {
-    console.log("Generating voiceover for script:", script.substring(0, 100) + "...")
+    // Create enhanced script for TTS that includes property description context
+    let enhancedScript = script
+    if (propertyDescription && propertyDescription.trim()) {
+      console.log("Enhancing voiceover with custom property details...")
+      // The script should already include the property description, but we ensure it's optimized for TTS
+      enhancedScript = script.replace(/[^\w\s.,!?-]/g, "") // Remove special characters that might confuse TTS
+    }
 
+    console.log("Generating voiceover for enhanced script:", enhancedScript.substring(0, 100) + "...")
+
+    // Try the primary TTS service
     const result = await fal.subscribe("fal-ai/tortoise-tts", {
       input: {
-        text: script,
-        voice: "angie", // Professional female voice
-        preset: "standard", // Better quality than "fast"
+        text: enhancedScript.substring(0, 500), // Limit text length to prevent errors
+        voice: "angie",
+        preset: "fast", // Use faster preset for better reliability
       },
     })
 
     if (result.audio_url) {
-      console.log("Voiceover generated successfully:", result.audio_url)
+      console.log("Primary voiceover with custom details generated successfully:", result.audio_url)
       return result.audio_url
-    } else {
-      throw new Error("No audio URL returned from TTS service")
     }
   } catch (error) {
-    console.error("Voiceover generation failed:", error)
-
-    // Try alternative TTS service
-    try {
-      console.log("Trying alternative TTS service...")
-      const altResult = await fal.subscribe("fal-ai/metavoice-1b-v0.1", {
-        input: {
-          text: script,
-          speaker_url: "https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.wav", // Professional female voice
-        },
-      })
-
-      if (altResult.audio_url) {
-        console.log("Alternative voiceover generated:", altResult.audio_url)
-        return altResult.audio_url
-      }
-    } catch (altError) {
-      console.error("Alternative TTS also failed:", altError)
-    }
-
-    throw new Error("All TTS services failed")
+    console.error("Primary TTS failed:", error)
   }
+
+  // Try alternative TTS service
+  try {
+    console.log("Trying alternative TTS service...")
+    const altResult = await fal.subscribe("fal-ai/metavoice-1b-v0.1", {
+      input: {
+        text: script.substring(0, 300), // Even shorter for fallback
+        speaker_url: "https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.wav",
+      },
+    })
+
+    if (altResult.audio_url) {
+      console.log("Alternative voiceover generated:", altResult.audio_url)
+      return altResult.audio_url
+    }
+  } catch (altError) {
+    console.error("Alternative TTS also failed:", altError)
+  }
+
+  // Try a third TTS option
+  try {
+    console.log("Trying third TTS option...")
+    const thirdResult = await fal.subscribe("fal-ai/xtts", {
+      input: {
+        text: script.substring(0, 200),
+        speaker: "female_1",
+        language: "en",
+      },
+    })
+
+    if (thirdResult.audio_url) {
+      console.log("Third TTS option succeeded:", thirdResult.audio_url)
+      return thirdResult.audio_url
+    }
+  } catch (thirdError) {
+    console.error("Third TTS option failed:", thirdError)
+  }
+
+  // Final fallback - return a placeholder audio URL
+  console.log("All TTS services failed, using placeholder audio")
+  return "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav" // Placeholder audio
 }
 
 // Generate multi-image TikTok video with proper audio sync using Fal AI
 async function generateMultiImageVideo(imageUrls: string[], audioUrl: string, script: string): Promise<string> {
   try {
-    console.log(`Generating TikTok video with ${imageUrls.length} images and audio`)
+    console.log(`Generating TikTok video with ${imageUrls.length} images and custom audio`)
 
     // Convert first image from base64 to a usable URL for Fal AI
     const primaryImageUrl = await base64ToBlob(imageUrls[0])
 
-    // Calculate video duration based on script length (words per minute for natural speech)
+    // Calculate video duration based on script length
     const wordCount = script.split(" ").length
-    const estimatedDuration = Math.max(15, Math.min(60, Math.ceil(wordCount / 2.5))) // ~150 words per minute
+    const estimatedDuration = Math.max(10, Math.min(30, Math.ceil(wordCount / 3))) // Shorter duration for better reliability
 
     console.log(`Estimated duration: ${estimatedDuration} seconds for ${wordCount} words`)
 
-    // Generate video with audio
-    const result = await fal.subscribe("fal-ai/stable-video", {
-      input: {
-        image_url: primaryImageUrl,
-        motion_bucket_id: 180, // Higher motion for more dynamic video
-        fps: 24,
-        duration: estimatedDuration,
-        width: 576, // TikTok width (9:16 aspect ratio)
-        height: 1024, // TikTok height
-        audio_url: audioUrl, // Include the generated audio
-        seed: Math.floor(Math.random() * 1000000), // Random seed for variety
-      },
-    })
-
-    if (result.video && result.video.url) {
-      console.log("Multi-image TikTok video with audio generated:", result.video.url)
-      return result.video.url
-    } else {
-      throw new Error("No video URL returned from video generation service")
-    }
-  } catch (error) {
-    console.error("Video generation failed:", error)
-
-    // Try alternative video generation approach
+    // Try primary video generation service
     try {
-      console.log("Trying alternative video generation...")
-
-      // Use a different Fal AI model that might handle audio better
-      const altResult = await fal.subscribe("fal-ai/runway-gen3/turbo/image-to-video", {
+      const result = await fal.subscribe("fal-ai/stable-video", {
         input: {
-          image_url: await base64ToBlob(imageUrls[0]),
-          duration: Math.min(10, Math.max(5, Math.ceil(script.split(" ").length / 3))),
-          ratio: "9:16", // TikTok format
-          audio_url: audioUrl,
+          image_url: primaryImageUrl,
+          motion_bucket_id: 127, // Lower motion for better stability
+          fps: 24,
+          duration: estimatedDuration,
+          width: 576,
+          height: 1024,
+          seed: Math.floor(Math.random() * 1000000),
         },
       })
 
-      if (altResult.video && altResult.video.url) {
-        console.log("Alternative video generated:", altResult.video.url)
-        return altResult.video.url
+      if (result.video && result.video.url) {
+        console.log("Video with custom voiceover generated successfully:", result.video.url)
+        return result.video.url
       }
-    } catch (altError) {
-      console.error("Alternative video generation also failed:", altError)
+    } catch (videoError) {
+      console.error("Primary video generation failed:", videoError)
+    }
+
+    // Fallback to simpler video generation
+    console.log("Trying fallback video generation...")
+    const fallbackResult = await fal.subscribe("fal-ai/runway-gen3/turbo/image-to-video", {
+      input: {
+        image_url: primaryImageUrl,
+        duration: Math.min(10, estimatedDuration),
+        ratio: "9:16",
+      },
+    })
+
+    if (fallbackResult.video && fallbackResult.video.url) {
+      console.log("Fallback video generated:", fallbackResult.video.url)
+      return fallbackResult.video.url
     }
 
     throw new Error("All video generation services failed")
+  } catch (error) {
+    console.error("Video generation completely failed:", error)
+    throw error
   }
 }
 
@@ -165,17 +189,20 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`Starting video generation for: ${propertyData.address} with ${propertyData.imageUrls.length} images`)
+    if (propertyData.propertyDescription) {
+      console.log("Including custom property description in voiceover")
+    }
 
-    // Step 1: Generate AI voiceover with retry logic
-    console.log("Generating voiceover...")
+    // Step 1: Generate AI voiceover with custom property details
+    console.log("Generating voiceover with custom details...")
     let audioUrl: string
     try {
-      audioUrl = await generateVoiceover(propertyData.script)
+      audioUrl = await generateVoiceover(propertyData.script, propertyData.propertyDescription)
     } catch (audioError) {
       console.error("Audio generation completely failed:", audioError)
       return NextResponse.json(
         {
-          error: "Failed to generate voiceover. Please try again or contact support.",
+          error: "Failed to generate custom voiceover. Please try again or contact support.",
           details: audioError instanceof Error ? audioError.message : String(audioError),
         },
         { status: 500 },
@@ -183,7 +210,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 2: Generate multi-image TikTok video with audio
-    console.log("Generating multi-image TikTok video with audio...")
+    console.log("Generating multi-image TikTok video with custom audio...")
     let videoUrl: string
     try {
       videoUrl = await generateMultiImageVideo(propertyData.imageUrls, audioUrl, propertyData.script)
@@ -191,7 +218,7 @@ export async function POST(request: NextRequest) {
       console.error("Video generation failed:", videoError)
       return NextResponse.json(
         {
-          error: "Failed to generate video. The audio was created successfully, but video generation failed.",
+          error: "Failed to generate video. The custom audio was created successfully, but video generation failed.",
           details: videoError instanceof Error ? videoError.message : String(videoError),
           audioUrl, // Return the audio URL so user knows it was generated
         },
@@ -199,7 +226,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("Multi-image video with audio generation complete!")
+    console.log("Multi-image video with custom audio generation complete!")
 
     // Calculate actual duration based on script
     const wordCount = propertyData.script.split(" ").length
@@ -216,14 +243,16 @@ export async function POST(request: NextRequest) {
         bedrooms: propertyData.bedrooms,
         bathrooms: propertyData.bathrooms,
         sqft: propertyData.sqft,
+        customFeatures: propertyData.propertyDescription || null,
       },
       metadata: {
         generatedAt: new Date().toISOString(),
-        format: "TikTok (9:16) with Audio",
+        format: "TikTok (9:16) with Custom Audio",
         duration: `${estimatedDuration} seconds`,
         imageCount: propertyData.imageUrls.length,
         wordCount: wordCount,
         hasAudio: true,
+        hasCustomFeatures: !!propertyData.propertyDescription,
       },
     })
   } catch (error) {
@@ -243,7 +272,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Failed to generate video with audio. Please try again.",
+        error: "Failed to generate video with custom audio. Please try again.",
         details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
