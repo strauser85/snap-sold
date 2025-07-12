@@ -58,23 +58,22 @@ const generateFallbackScript = (data: PropertyData): string => {
   return script
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const propertyData: PropertyData = await request.json()
+// OpenAI API function
+async function generateOpenAIScript(propertyData: PropertyData): Promise<string> {
+  const { address, price, bedrooms, bathrooms, sqft, imageCount = 1 } = propertyData
 
-    console.log("Generating script for:", propertyData.address)
-
-    // Try AI generation first (if available)
-    try {
-      // Check if we have AI SDK available
-      const { generateText } = await import("ai")
-      const { openai } = await import("@ai-sdk/openai")
-
-      const { address, price, bedrooms, bathrooms, sqft, imageCount = 1 } = propertyData
-
-      const { text: script } = await generateText({
-        model: openai("gpt-4o"),
-        system: `You are a top real estate marketing expert who creates viral TikTok scripts. Create engaging, persuasive voiceover scripts for property videos that:
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: `You are a top real estate marketing expert who creates viral TikTok scripts. Create engaging, persuasive voiceover scripts for property videos that:
 
 1. Hook viewers in the first 3 seconds with a compelling question or statement
 2. Use urgency and scarcity tactics ("This won't last long!")
@@ -88,7 +87,10 @@ export async function POST(request: NextRequest) {
 10. Create anticipation for each room/feature reveal
 
 The script should feel authentic and exciting, not salesy. Focus on lifestyle transformation and investment opportunity.`,
-        prompt: `Create a viral TikTok voiceover script for this property with ${imageCount} images:
+        },
+        {
+          role: "user",
+          content: `Create a viral TikTok voiceover script for this property with ${imageCount} images:
 
 Address: ${address}
 Price: $${price.toLocaleString()}
@@ -98,32 +100,61 @@ Square Feet: ${sqft.toLocaleString()}
 Images Available: ${imageCount} photos
 
 Make it compelling for potential buyers and investors with hooks, benefits, urgency, and strong call-to-action.`,
-      })
+        },
+      ],
+      max_tokens: 500,
+      temperature: 0.8,
+    }),
+  })
 
-      console.log("AI script generated successfully")
-      return NextResponse.json({
-        success: true,
-        script: script.trim(),
-        method: "AI",
-      })
-    } catch (aiError) {
-      console.log("AI generation failed, using fallback:", aiError)
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`OpenAI API error: ${response.status} - ${error}`)
+  }
 
-      // Use fallback script generation
-      const fallbackScript = generateFallbackScript(propertyData)
+  const data = await response.json()
+  return data.choices[0].message.content.trim()
+}
 
-      console.log("Fallback script generated successfully")
-      return NextResponse.json({
-        success: true,
-        script: fallbackScript,
-        method: "fallback",
-      })
+export async function POST(request: NextRequest) {
+  try {
+    const propertyData: PropertyData = await request.json()
+
+    console.log("Generating script for:", propertyData.address)
+
+    // First try OpenAI API if key is available
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        console.log("Using OpenAI API for script generation...")
+        const script = await generateOpenAIScript(propertyData)
+
+        console.log("OpenAI script generated successfully")
+        return NextResponse.json({
+          success: true,
+          script: script,
+          method: "OpenAI",
+        })
+      } catch (aiError) {
+        console.log("OpenAI API failed, using fallback:", aiError)
+      }
+    } else {
+      console.log("No OpenAI API key found, using fallback")
     }
+
+    // Use fallback script generation
+    const fallbackScript = generateFallbackScript(propertyData)
+
+    console.log("Fallback script generated successfully")
+    return NextResponse.json({
+      success: true,
+      script: fallbackScript,
+      method: "fallback",
+    })
   } catch (error) {
     console.error("Script generation error:", error)
 
     // Last resort - basic template
-    const basicScript = `🏡 Welcome to this amazing property! This stunning home features ${request.body ? "multiple" : ""} bedrooms and bathrooms with incredible living space. Don't miss this opportunity! Contact me today! 📞✨`
+    const basicScript = `🏡 Welcome to this amazing property! This stunning home features multiple bedrooms and bathrooms with incredible living space. Don't miss this opportunity! Contact me today! 📞✨`
 
     return NextResponse.json({
       success: true,
