@@ -20,6 +20,8 @@ import {
   List,
   Info,
   FileText,
+  Volume2,
+  Upload,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
 
@@ -39,8 +41,10 @@ interface VideoResult {
 interface UploadedImage {
   file: File
   previewUrl: string
-  base64: string
+  blobUrl?: string
   id: string
+  isUploading?: boolean
+  uploadError?: string
 }
 
 export default function VideoGenerator() {
@@ -61,15 +65,57 @@ export default function VideoGenerator() {
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const MAX_IMAGES = 20
+  const MAX_IMAGES = 15
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.readAsDataURL(file)
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = (error) => reject(error)
+  // Compress image to reduce file size
+  const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement("canvas")
+      const ctx = canvas.getContext("2d")!
+      const img = new Image()
+
+      img.onload = () => {
+        // Calculate new dimensions
+        const ratio = Math.min(maxWidth / img.width, maxWidth / img.height)
+        canvas.width = img.width * ratio
+        canvas.height = img.height * ratio
+
+        // Draw and compress
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        canvas.toBlob(
+          (blob) => {
+            const compressedFile = new File([blob!], file.name, {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            })
+            resolve(compressedFile)
+          },
+          "image/jpeg",
+          quality,
+        )
+      }
+
+      img.src = URL.createObjectURL(file)
     })
+  }
+
+  // Upload image to Vercel Blob
+  const uploadImageToBlob = async (file: File): Promise<string> => {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const response = await fetch("/api/upload-image", {
+      method: "POST",
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || "Upload failed")
+    }
+
+    const data = await response.json()
+    return data.url
   }
 
   const handleImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -79,18 +125,54 @@ export default function VideoGenerator() {
 
       for (let i = 0; i < Math.min(files.length, remainingSlots); i++) {
         const file = files[i]
+        const imageId = `img-${Date.now()}-${i}`
 
+        // Add image to state immediately with uploading status
+        const newImage: UploadedImage = {
+          file,
+          previewUrl: URL.createObjectURL(file),
+          id: imageId,
+          isUploading: true,
+        }
+
+        setUploadedImages((prev) => [...prev, newImage])
+
+        // Compress and upload in background
         try {
-          const base64 = await fileToBase64(file)
-          const newImage: UploadedImage = {
-            file,
-            previewUrl: URL.createObjectURL(file),
-            base64: base64,
-            id: `img-${Date.now()}-${i}`,
-          }
-          setUploadedImages((prev) => [...prev, newImage])
+          console.log(`Compressing image ${i + 1}...`)
+          const compressedFile = await compressImage(file)
+          console.log(`Original: ${file.size} bytes, Compressed: ${compressedFile.size} bytes`)
+
+          console.log(`Uploading image ${i + 1} to blob storage...`)
+          const blobUrl = await uploadImageToBlob(compressedFile)
+
+          // Update image with blob URL
+          setUploadedImages((prev) =>
+            prev.map((img) =>
+              img.id === imageId
+                ? {
+                    ...img,
+                    blobUrl,
+                    isUploading: false,
+                  }
+                : img,
+            ),
+          )
+
+          console.log(`Image ${i + 1} uploaded successfully:`, blobUrl)
         } catch (error) {
-          console.error("Error converting file to base64:", error)
+          console.error(`Failed to upload image ${i + 1}:`, error)
+          setUploadedImages((prev) =>
+            prev.map((img) =>
+              img.id === imageId
+                ? {
+                    ...img,
+                    isUploading: false,
+                    uploadError: error instanceof Error ? error.message : "Upload failed",
+                  }
+                : img,
+            ),
+          )
         }
       }
     }
@@ -190,24 +272,45 @@ export default function VideoGenerator() {
       return
     }
 
+    // Check if all images are uploaded
+    const uploadingImages = uploadedImages.filter((img) => img.isUploading)
+    const failedImages = uploadedImages.filter((img) => img.uploadError)
+
+    if (uploadingImages.length > 0) {
+      setError(`Please wait for ${uploadingImages.length} image(s) to finish uploading.`)
+      return
+    }
+
+    if (failedImages.length > 0) {
+      setError(`${failedImages.length} image(s) failed to upload. Please remove them and try again.`)
+      return
+    }
+
+    const successfulImages = uploadedImages.filter((img) => img.blobUrl)
+    if (successfulImages.length === 0) {
+      setError("No images were successfully uploaded. Please try uploading again.")
+      return
+    }
+
     setIsLoading(true)
     setError(null)
     setResult(null)
     setProgress(null)
 
     try {
-      setProgress({ step: `Processing ${uploadedImages.length} images...`, progress: 20 })
+      setProgress({ step: `Processing ${successfulImages.length} images...`, progress: 15 })
+      await new Promise((resolve) => setTimeout(resolve, 1500))
 
-      // Compress images to reduce payload size
-      const compressedImages = uploadedImages.slice(0, 5) // Limit to 5 images max for better reliability
-      const imageUrls = compressedImages.map((img) => img.base64)
+      setProgress({ step: "Generating professional AI voiceover (30-60 seconds)...", progress: 35 })
+      await new Promise((resolve) => setTimeout(resolve, 3000))
 
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      setProgress({ step: "Generating AI voiceover with your custom details...", progress: 40 })
+      setProgress({ step: `Creating slideshow video with ${successfulImages.length} images...`, progress: 65 })
       await new Promise((resolve) => setTimeout(resolve, 2000))
 
-      setProgress({ step: "Creating TikTok video with your images...", progress: 70 })
+      setProgress({ step: "Merging audio and video...", progress: 85 })
+
+      // Use blob URLs instead of base64
+      const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
       const response = await fetch("/api/generate-video", {
         method: "POST",
@@ -226,32 +329,32 @@ export default function VideoGenerator() {
         }),
       })
 
-      // Better error handling for different response types
       let data
       const contentType = response.headers.get("content-type")
 
       if (contentType && contentType.includes("application/json")) {
         data = await response.json()
       } else {
-        // Handle non-JSON responses
         const text = await response.text()
         console.error("Non-JSON response:", text)
         throw new Error(`Server error (${response.status}): Please try again in a few moments.`)
       }
 
       if (!response.ok) {
-        // Handle specific error cases
         if (response.status === 500 && data.error?.includes("voiceover")) {
           throw new Error("AI voiceover service is temporarily unavailable. Please try again in a few minutes.")
         } else if (response.status === 413) {
-          throw new Error("Request too large. Please use fewer or smaller images.")
+          throw new Error("Request too large. Please use fewer images.")
         } else {
           throw new Error(data.error || `Server error: ${response.status}`)
         }
       }
 
       setResult(data)
-      setProgress({ step: "TikTok video with custom voiceover generated successfully!", progress: 100 })
+      setProgress({
+        step: `Professional slideshow video with ${successfulImages.length} images generated!`,
+        progress: 100,
+      })
     } catch (err) {
       console.error("Generation error:", err)
       let errorMessage = "An unexpected error occurred."
@@ -261,7 +364,7 @@ export default function VideoGenerator() {
           errorMessage =
             "AI voiceover generation failed. The service may be temporarily unavailable. Please try again in a few minutes."
         } else if (err.message.includes("413") || err.message.includes("too large")) {
-          errorMessage = "Request too large. Please reduce the number of images (max 5) or try smaller file sizes."
+          errorMessage = "Request too large. Please reduce the number of images or try smaller file sizes."
         } else if (err.message.includes("JSON")) {
           errorMessage = "Server communication error. Please try again."
         } else {
@@ -291,6 +394,10 @@ export default function VideoGenerator() {
     setProgress(null)
   }
 
+  const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
+  const uploadingCount = uploadedImages.filter((img) => img.isUploading).length
+  const failedCount = uploadedImages.filter((img) => img.uploadError).length
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl space-y-8">
@@ -298,7 +405,7 @@ export default function VideoGenerator() {
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">SnapSold</h1>
           <p className="text-lg text-gray-600 leading-relaxed">
-            Create viral TikTok videos with AI-powered scripts and multiple property images
+            Create viral TikTok videos with AI-powered scripts and up to 15 property images
           </p>
         </div>
 
@@ -414,7 +521,10 @@ Examples:
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Label htmlFor="images" className="text-sm font-medium text-gray-700">
-                  Upload Property Images (Max {MAX_IMAGES}) - {uploadedImages.length} uploaded
+                  Upload Property Images (Max {MAX_IMAGES})
+                  <span className="ml-2 text-xs text-gray-500">
+                    {uploadedCount} uploaded, {uploadingCount} uploading, {failedCount} failed
+                  </span>
                 </Label>
                 <div className="flex gap-2">
                   <Button
@@ -438,12 +548,20 @@ Examples:
                 disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
               />
 
-              {uploadedImages.length > 5 && (
+              {uploadingCount > 0 && (
                 <Alert>
+                  <Upload className="h-4 w-4" />
+                  <AlertDescription>
+                    Uploading and compressing {uploadingCount} image(s)... Please wait before generating video.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {failedCount > 0 && (
+                <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>
-                    You have {uploadedImages.length} images. Only the first 5 will be used for video generation to
-                    ensure reliability and prevent timeouts.
+                    {failedCount} image(s) failed to upload. Please remove them and try again.
                   </AlertDescription>
                 </Alert>
               )}
@@ -463,6 +581,21 @@ Examples:
                           <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
                             {index + 1}
                           </div>
+                          {img.isUploading && (
+                            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-md">
+                              <Loader2 className="h-4 w-4 text-white animate-spin" />
+                            </div>
+                          )}
+                          {img.uploadError && (
+                            <div className="absolute inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center rounded-md">
+                              <XCircle className="h-4 w-4 text-white" />
+                            </div>
+                          )}
+                          {img.blobUrl && (
+                            <div className="absolute top-1 right-6 bg-green-500 bg-opacity-75 rounded-full p-1">
+                              <CheckCircle className="h-3 w-3 text-white" />
+                            </div>
+                          )}
                           <Button
                             variant="destructive"
                             size="icon"
@@ -487,6 +620,9 @@ Examples:
                           <div className="flex-1">
                             <p className="text-sm font-medium">Image {index + 1}</p>
                             <p className="text-xs text-gray-500">{img.file.name}</p>
+                            {img.isUploading && <p className="text-xs text-blue-500">Uploading...</p>}
+                            {img.uploadError && <p className="text-xs text-red-500">Upload failed</p>}
+                            {img.blobUrl && <p className="text-xs text-green-500">Ready</p>}
                           </div>
                           <div className="flex gap-1">
                             <Button
@@ -528,7 +664,7 @@ Examples:
                 <div className="text-center text-gray-500 text-sm py-8 border-2 border-dashed border-gray-300 rounded-lg">
                   <ImageIcon className="h-12 w-12 mx-auto mb-2 text-gray-400" />
                   <p>No images uploaded yet.</p>
-                  <p className="text-xs">Upload up to {MAX_IMAGES} property images for your video</p>
+                  <p className="text-xs">Upload up to {MAX_IMAGES} property images for your slideshow video</p>
                 </div>
               )}
             </div>
@@ -607,17 +743,19 @@ Examples:
                 !bathrooms ||
                 !sqft ||
                 !generatedScript ||
-                uploadedImages.length === 0
+                uploadedImages.length === 0 ||
+                uploadingCount > 0 ||
+                uploadedCount === 0
               }
               className="w-full h-12 text-base font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating Custom TikTok Video...
+                  Creating Slideshow Video...
                 </>
               ) : (
-                `Generate TikTok Video (${uploadedImages.length} images)`
+                `Generate Slideshow Video (${uploadedCount} images ready)`
               )}
             </Button>
           </CardContent>
@@ -653,19 +791,26 @@ Examples:
               {result ? (
                 <div className="text-center space-y-4 w-full">
                   <div className="bg-black rounded-lg aspect-[9/16] flex items-center justify-center relative overflow-hidden">
-                    {result.videoUrl.includes("sample-videos") ? (
-                      <CheckCircle className="h-16 w-16 text-green-400" />
-                    ) : (
-                      <video
-                        src={result.videoUrl}
-                        controls
-                        className="w-full h-full object-cover"
-                        poster="/placeholder.svg?height=400&width=225"
-                      />
-                    )}
-                    <div className="absolute bottom-4 left-4 right-4 text-white">
+                    <video
+                      src={result.videoUrl}
+                      controls
+                      className="w-full h-full object-cover"
+                      poster="/placeholder.svg?height=400&width=225"
+                      preload="metadata"
+                      onError={(e) => {
+                        console.error("Video playback error:", e)
+                      }}
+                      onLoadedMetadata={(e) => {
+                        const video = e.target as HTMLVideoElement
+                        console.log("Video duration:", video.duration, "seconds")
+                      }}
+                    />
+                    <div className="absolute bottom-4 left-4 right-4 text-white bg-black bg-opacity-50 p-2 rounded">
                       <p className="text-sm font-medium">{result.listing.address}</p>
-                      <p className="text-xs opacity-80">Custom TikTok video with personalized voiceover!</p>
+                      <p className="text-xs opacity-80 flex items-center gap-1">
+                        <Volume2 className="h-3 w-3" />
+                        Slideshow with {result.metadata?.imageCount} images!
+                      </p>
                     </div>
                   </div>
 
@@ -684,12 +829,12 @@ Examples:
                           </p>
                         </div>
                         <div>
-                          <p className="font-medium text-gray-700">Images Used:</p>
-                          <p className="text-gray-600">{uploadedImages.length} photos</p>
+                          <p className="font-medium text-gray-700">Images:</p>
+                          <p className="text-gray-600">{result.metadata?.imageCount} photos</p>
                         </div>
                         <div>
-                          <p className="font-medium text-gray-700">Custom Features:</p>
-                          <p className="text-gray-600">{propertyDescription ? "Included" : "None"}</p>
+                          <p className="font-medium text-gray-700">Duration:</p>
+                          <p className="text-gray-600">{result.metadata?.duration}</p>
                         </div>
                       </div>
                     </div>
@@ -714,7 +859,8 @@ Examples:
                   <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     <Play className="h-6 w-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500">Your custom TikTok video will appear here</p>
+                  <p className="text-sm text-gray-500">Your slideshow video will appear here</p>
+                  <p className="text-xs text-gray-400">Up to 15 images with AI voiceover</p>
                 </div>
               )}
             </div>
