@@ -18,6 +18,7 @@ import {
   Wand2,
   Grid3X3,
   List,
+  Info,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
 
@@ -50,6 +51,7 @@ export default function VideoGenerator() {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [generatedScript, setGeneratedScript] = useState("")
   const [imageViewMode, setImageViewMode] = useState<"grid" | "list">("grid")
+  const [scriptMethod, setScriptMethod] = useState<string>("")
 
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
@@ -125,8 +127,11 @@ export default function VideoGenerator() {
 
     setIsGeneratingScript(true)
     setError(null)
+    setScriptMethod("")
 
     try {
+      console.log("Calling script generation API...")
+
       const response = await fetch("/api/generate-script", {
         method: "POST",
         headers: {
@@ -138,19 +143,32 @@ export default function VideoGenerator() {
           bedrooms: Number(bedrooms),
           bathrooms: Number(bathrooms),
           sqft: Number(sqft),
-          imageCount: uploadedImages.length, // Include image count for better script generation
+          imageCount: uploadedImages.length,
         }),
       })
 
+      console.log("API response status:", response.status)
+
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to generate script.")
+        const errorText = await response.text()
+        console.error("API error:", errorText)
+        throw new Error(`API returned ${response.status}: ${errorText}`)
       }
 
       const data = await response.json()
+      console.log("Script generated successfully:", data.method)
+
       setGeneratedScript(data.script)
+      setScriptMethod(data.method)
     } catch (err) {
+      console.error("Script generation failed:", err)
       setError(err instanceof Error ? err.message : "Failed to generate script.")
+
+      // Fallback to basic script if API completely fails
+      const basicScript = `🏡 Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of luxurious living space. Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity you won't want to miss! Schedule a tour today! 📞✨`
+
+      setGeneratedScript(basicScript)
+      setScriptMethod("emergency")
     } finally {
       setIsGeneratingScript(false)
     }
@@ -215,6 +233,7 @@ export default function VideoGenerator() {
     setBathrooms("")
     setSqft("")
     setGeneratedScript("")
+    setScriptMethod("")
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     setUploadedImages([])
     setResult(null)
@@ -428,6 +447,17 @@ export default function VideoGenerator() {
               <div className="flex items-center justify-between">
                 <Label htmlFor="generated-script" className="text-sm font-medium text-gray-700">
                   AI-Generated TikTok Script
+                  {scriptMethod && (
+                    <span className="ml-2 text-xs text-gray-500">
+                      (
+                      {scriptMethod === "AI"
+                        ? "AI-powered"
+                        : scriptMethod === "fallback"
+                          ? "Smart template"
+                          : "Basic template"}
+                      )
+                    </span>
+                  )}
                 </Label>
                 <Button
                   onClick={generateAIScript}
@@ -457,6 +487,14 @@ export default function VideoGenerator() {
                 className="min-h-[120px] text-base"
                 disabled={isLoading}
               />
+              {scriptMethod === "fallback" && (
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    AI generation unavailable - using smart template. You can edit the script above.
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
 
             <Button
