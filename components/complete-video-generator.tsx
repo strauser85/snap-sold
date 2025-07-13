@@ -183,7 +183,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
         audioElement.currentTime = 0
         await audioElement.play()
 
-        // Animation loop with captions
+        // Animation loop with perfectly synced captions
         const startTime = Date.now()
         const durationMs = videoData.duration * 1000
         const timePerImageMs = videoData.timePerImage * 1000
@@ -201,7 +201,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           // Calculate current image
           const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-          // Find current caption
+          // Find current caption with precise timing
           const currentCaption = videoData.captions.find(
             (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds < caption.endTime,
           )
@@ -222,12 +222,15 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw TikTok captions with typewriter animation
+            // Draw perfectly synced captions with yellow text and black background bars
             if (currentCaption) {
-              const captionProgress =
-                (elapsedSeconds - currentCaption.startTime) / (currentCaption.endTime - currentCaption.startTime)
+              // Calculate typewriter progress based on precise timing
+              const captionDuration = currentCaption.endTime - currentCaption.startTime
+              const captionElapsed = elapsedSeconds - currentCaption.startTime
+              const captionProgress = Math.max(0, Math.min(1, captionElapsed / captionDuration))
+
               const words = currentCaption.text.split(" ")
-              const maxWordsPerLine = 4
+              const maxWordsPerLine = 3 // Reduced for better readability
               const lines: string[] = []
 
               // Break text into lines
@@ -235,19 +238,20 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                 lines.push(words.slice(i, i + maxWordsPerLine).join(" "))
               }
 
+              // Font settings - bold yellow with comfortable size
+              const fontSize = Math.floor(canvas.width * 0.055) // Slightly smaller for better fit
+              ctx.font = `900 ${fontSize}px "Arial Black", "Arial", sans-serif` // Extra bold
+              ctx.textAlign = "center"
+
+              const lineHeight = fontSize * 1.4
+              const padding = fontSize * 0.3
+              const totalHeight = lines.length * lineHeight
+              const startY = canvas.height * 0.78 // Positioned in lower third
+
               // Calculate total characters for typewriter effect
               const fullText = lines.join(" ")
               const totalChars = fullText.length
               const charsToShow = Math.floor(captionProgress * totalChars)
-
-              // Font settings - smaller and more readable
-              const fontSize = Math.floor(canvas.width * 0.06) // Reduced from 0.09 to 0.06
-              ctx.font = `bold ${fontSize}px "Arial", "Helvetica", sans-serif`
-              ctx.textAlign = "center"
-
-              const lineHeight = fontSize * 1.2
-              const totalHeight = lines.length * lineHeight
-              const startY = canvas.height * 0.8 // Moved up slightly from 0.72 to 0.8
 
               let charCount = 0
 
@@ -265,33 +269,52 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                 }
 
                 if (visibleText.length > 0) {
-                  // Multiple shadow layers for better readability
-                  ctx.strokeStyle = "#000000"
-                  ctx.lineWidth = Math.floor(fontSize * 0.25)
-                  ctx.strokeText(visibleText, canvas.width / 2, y)
+                  // Measure text for background bar
+                  const textMetrics = ctx.measureText(visibleText)
+                  const textWidth = textMetrics.width
+                  const barWidth = textWidth + padding * 2
+                  const barHeight = fontSize + padding
+                  const barX = (canvas.width - barWidth) / 2
+                  const barY = y - fontSize * 0.8
 
-                  // Secondary shadow for depth
-                  ctx.strokeStyle = "#333333"
-                  ctx.lineWidth = Math.floor(fontSize * 0.15)
-                  ctx.strokeText(visibleText, canvas.width / 2 + 1, y + 1)
+                  // Draw semi-transparent black background bar
+                  ctx.fillStyle = "rgba(0, 0, 0, 0.75)" // 75% opacity black
+                  ctx.fillRect(barX, barY, barWidth, barHeight)
 
-                  // Main text - clean white
-                  ctx.fillStyle = "#FFFFFF"
+                  // Add subtle border for extra definition
+                  ctx.strokeStyle = "rgba(0, 0, 0, 0.9)"
+                  ctx.lineWidth = 1
+                  ctx.strokeRect(barX, barY, barWidth, barHeight)
+
+                  // Draw bold yellow text
+                  ctx.fillStyle = "#FFD700" // Gold/yellow color
                   ctx.fillText(visibleText, canvas.width / 2, y)
 
-                  // Add cursor effect at the end of current text
-                  if (charsToShow >= lineStartChar && charsToShow <= lineEndChar && visibleText.length > 0) {
-                    const textWidth = ctx.measureText(visibleText).width
-                    const cursorX = canvas.width / 2 + textWidth / 2 + 2
+                  // Add text shadow for extra pop
+                  ctx.shadowColor = "rgba(0, 0, 0, 0.8)"
+                  ctx.shadowBlur = 2
+                  ctx.shadowOffsetX = 1
+                  ctx.shadowOffsetY = 1
+                  ctx.fillText(visibleText, canvas.width / 2, y)
 
-                    // Blinking cursor effect
-                    const blinkRate = 2 // blinks per second
+                  // Reset shadow
+                  ctx.shadowColor = "transparent"
+                  ctx.shadowBlur = 0
+                  ctx.shadowOffsetX = 0
+                  ctx.shadowOffsetY = 0
+
+                  // Add blinking cursor effect at the end of current text
+                  if (charsToShow >= lineStartChar && charsToShow <= lineEndChar && visibleText.length > 0) {
+                    const cursorX = canvas.width / 2 + textWidth / 2 + 3
+
+                    // Blinking cursor effect - faster blink for more dynamic feel
+                    const blinkRate = 3 // 3 blinks per second
                     const shouldShowCursor = Math.floor(elapsedSeconds * blinkRate) % 2 === 0
 
-                    if (shouldShowCursor && captionProgress < 0.95) {
+                    if (shouldShowCursor && captionProgress < 0.98) {
                       // Hide cursor near end
-                      ctx.fillStyle = "#FFFFFF"
-                      ctx.fillRect(cursorX, y - fontSize * 0.8, 2, fontSize * 0.9)
+                      ctx.fillStyle = "#FFD700"
+                      ctx.fillRect(cursorX, y - fontSize * 0.7, 3, fontSize * 0.8)
                     }
                   }
                 }
@@ -300,26 +323,45 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               })
             }
 
-            // Property info overlay
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
-            ctx.fillRect(0, 0, canvas.width, 100)
+            // Property info overlay - improved styling
+            const overlayGradient = ctx.createLinearGradient(0, 0, 0, 120)
+            overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.9)")
+            overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.6)")
+            ctx.fillStyle = overlayGradient
+            ctx.fillRect(0, 0, canvas.width, 120)
 
+            // Property address
             ctx.fillStyle = "#FFFFFF"
-            ctx.font = "bold 18px Arial"
+            ctx.font = "bold 20px Arial"
             ctx.textAlign = "left"
-            ctx.fillText(videoData.property.address, 20, 30)
+            ctx.shadowColor = "rgba(0, 0, 0, 0.8)"
+            ctx.shadowBlur = 2
+            ctx.fillText(videoData.property.address, 20, 35)
 
+            // Price in gold
             ctx.fillStyle = "#FFD700"
-            ctx.font = "bold 16px Arial"
-            ctx.fillText(`$${videoData.property.price.toLocaleString()}`, 20, 50)
+            ctx.font = "bold 18px Arial"
+            ctx.fillText(`$${videoData.property.price.toLocaleString()}`, 20, 60)
 
+            // Property details
             ctx.fillStyle = "#FFFFFF"
-            ctx.font = "14px Arial"
+            ctx.font = "16px Arial"
             ctx.fillText(
               `${videoData.property.bedrooms}BR • ${videoData.property.bathrooms}BA • ${videoData.property.sqft.toLocaleString()} sqft`,
               20,
-              70,
+              85,
             )
+
+            // Rachel voice indicator
+            ctx.fillStyle = "#FF69B4"
+            ctx.font = "bold 14px Arial"
+            ctx.textAlign = "right"
+            ctx.fillText("🎤 Rachel Voice", canvas.width - 20, 105)
+
+            // Reset shadow and text align
+            ctx.shadowColor = "transparent"
+            ctx.shadowBlur = 0
+            ctx.textAlign = "start"
           }
 
           // Update progress
