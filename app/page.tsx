@@ -21,7 +21,7 @@ import {
   Upload,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { FixedAudioGenerator } from "@/components/fixed-audio-generator"
+import { CanvasSlideshowGenerator } from "@/components/canvas-slideshow-generator"
 
 interface GenerationProgress {
   step: string
@@ -63,7 +63,7 @@ export default function VideoGenerator() {
   const [error, setError] = useState<string | null>(null)
 
   const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
-  const [showGenerator, setShowGenerator] = useState(false)
+  const [showCanvasGenerator, setShowCanvasGenerator] = useState(false)
 
   const MAX_IMAGES = 20
 
@@ -236,7 +236,7 @@ export default function VideoGenerator() {
     setProgress(null)
 
     try {
-      setProgress({ step: "Preparing video generation...", progress: 25 })
+      setProgress({ step: "Preparing slideshow generation...", progress: 25 })
 
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
@@ -271,10 +271,10 @@ export default function VideoGenerator() {
           format: data.slideshowConfig.format,
         })
 
-        setShowGenerator(true)
-        setProgress({ step: "Video generator ready!", progress: 100 })
+        setShowCanvasGenerator(true)
+        setProgress({ step: "Canvas slideshow ready!", progress: 100 })
       } else {
-        throw new Error("Failed to prepare video generation")
+        throw new Error("Failed to prepare slideshow")
       }
     } catch (err) {
       console.error("Generation error:", err)
@@ -299,7 +299,7 @@ export default function VideoGenerator() {
     setError(null)
     setProgress(null)
     setSlideshowConfig(null)
-    setShowGenerator(false)
+    setShowCanvasGenerator(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -546,10 +546,10 @@ export default function VideoGenerator() {
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Preparing Video...
+                  Preparing Slideshow...
                 </>
               ) : (
-                `Generate Video (${uploadedCount} images ready)`
+                `Generate Slideshow (${uploadedCount} images ready)`
               )}
             </Button>
           </CardContent>
@@ -600,15 +600,15 @@ export default function VideoGenerator() {
                       Generate Another
                     </Button>
                     <Button asChild className="flex-1">
-                      <a href={result.videoUrl} download="property-slideshow.webm">
+                      <a href={result.videoUrl} download="elevenlabs-slideshow.webm">
                         <Download className="mr-2 h-4 w-4" />
                         Download
                       </a>
                     </Button>
                   </div>
                 </div>
-              ) : showGenerator && slideshowConfig ? (
-                <FixedAudioGenerator
+              ) : showCanvasGenerator && slideshowConfig ? (
+                <CanvasSlideshowGenerator
                   config={slideshowConfig}
                   onVideoGenerated={(videoUrl) => {
                     setResult({
@@ -618,11 +618,11 @@ export default function VideoGenerator() {
                       listing: { address, price: Number(price) },
                       metadata: { imageCount: slideshowConfig.images.length },
                     })
-                    setShowGenerator(false)
+                    setShowCanvasGenerator(false)
                   }}
                   onError={(error) => {
                     setError(error)
-                    setShowGenerator(false)
+                    setShowCanvasGenerator(false)
                   }}
                 />
               ) : (
@@ -630,7 +630,7 @@ export default function VideoGenerator() {
                   <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     <Play className="h-6 w-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500">Your video will appear here</p>
+                  <p className="text-sm text-gray-500">Your slideshow will appear here</p>
                   <p className="text-xs text-gray-400">ElevenLabs voiceover included</p>
                 </div>
               )}

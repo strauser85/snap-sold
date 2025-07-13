@@ -1,115 +1,85 @@
 import { type NextRequest, NextResponse } from "next/server"
 
+interface PropertyInput {
+  address: string
+  price: number
+  bedrooms: number
+  bathrooms: number
+  sqft: number
+  propertyDescription?: string
+  script: string
+  imageUrls: string[]
+}
+
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 Video generation API called")
+    const propertyData: PropertyInput = await request.json()
 
-    const body = await request.json()
-    console.log("📝 Request received:", {
-      address: body.address,
-      imageCount: body.imageUrls?.length || 0,
-      scriptLength: body.script?.length || 0,
+    if (
+      !propertyData.address ||
+      !propertyData.price ||
+      !propertyData.script ||
+      !propertyData.imageUrls ||
+      propertyData.imageUrls.length === 0
+    ) {
+      return NextResponse.json({ error: "Missing required property data" }, { status: 400 })
+    }
+
+    console.log(`🎬 Generating slideshow for ${propertyData.address}`)
+
+    // Call canvas slideshow API
+    const slideshowResponse = await fetch(`${request.nextUrl.origin}/api/canvas-slideshow`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        imageUrls: propertyData.imageUrls,
+        script: propertyData.script,
+        propertyData: {
+          address: propertyData.address,
+          price: propertyData.price,
+          bedrooms: propertyData.bedrooms,
+          bathrooms: propertyData.bathrooms,
+          sqft: propertyData.sqft,
+          propertyDescription: propertyData.propertyDescription,
+        },
+      }),
     })
 
-    // Validation
-    if (!body.address || !body.script || !body.imageUrls || body.imageUrls.length === 0) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    if (!slideshowResponse.ok) {
+      const errorData = await slideshowResponse.json()
+      throw new Error(errorData.error || "Slideshow preparation failed")
     }
 
-    // Generate ElevenLabs audio with better error handling
-    let audioUrl = ""
-    let audioError = null
+    const slideshowData = await slideshowResponse.json()
 
-    try {
-      if (process.env.ELEVENLABS_API_KEY) {
-        console.log("🎤 Generating ElevenLabs audio...")
-
-        const cleanScript = body.script
-          .replace(/[^\w\s.,!?'-]/g, " ")
-          .replace(/\s+/g, " ")
-          .replace(/\$(\d+)/g, "$1 dollars")
-          .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
-          .trim()
-
-        const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
-          method: "POST",
-          headers: {
-            Accept: "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": process.env.ELEVENLABS_API_KEY,
-          },
-          body: JSON.stringify({
-            text: cleanScript,
-            model_id: "eleven_monolingual_v1",
-            voice_settings: {
-              stability: 0.6,
-              similarity_boost: 0.8,
-              style: 0.2,
-            },
-            output_format: "mp3_44100_128",
-          }),
-        })
-
-        if (response.ok) {
-          const audioBlob = await response.blob()
-          if (audioBlob.size > 0) {
-            const arrayBuffer = await audioBlob.arrayBuffer()
-            const base64Audio = Buffer.from(arrayBuffer).toString("base64")
-            audioUrl = `data:audio/mpeg;base64,${base64Audio}`
-            console.log("✅ ElevenLabs audio generated successfully")
-          } else {
-            throw new Error("Empty audio response")
-          }
-        } else {
-          const errorText = await response.text()
-          throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
-        }
-      } else {
-        throw new Error("ElevenLabs API key not configured")
-      }
-    } catch (error) {
-      console.error("❌ ElevenLabs audio failed:", error)
-      audioError = error instanceof Error ? error.message : "Audio generation failed"
+    if (!slideshowData.success) {
+      throw new Error("Slideshow configuration failed")
     }
-
-    // Calculate timing
-    const wordCount = body.script.split(" ").length
-    const estimatedDuration = Math.max(30, wordCount * 0.5)
-    const timePerImage = Math.max(3, Math.floor(estimatedDuration / body.imageUrls.length))
-    const totalDuration = body.imageUrls.length * timePerImage
-
-    console.log(`📊 Timing: ${timePerImage}s per image, ${totalDuration}s total`)
 
     return NextResponse.json({
       success: true,
-      slideshowConfig: {
-        images: body.imageUrls,
-        timePerImage,
-        totalDuration,
-        audioUrl,
-        audioError,
-        format: {
-          width: 576,
-          height: 1024,
-          fps: 30,
-        },
-      },
-      script: body.script,
+      method: "canvas-slideshow",
+      audioUrl: slideshowData.audioUrl,
+      slideshowConfig: slideshowData.slideshow,
+      script: propertyData.script,
       listing: {
-        address: body.address,
-        price: body.price,
+        address: propertyData.address,
+        price: propertyData.price,
+        bedrooms: propertyData.bedrooms,
+        bathrooms: propertyData.bathrooms,
+        sqft: propertyData.sqft,
       },
       metadata: {
-        imageCount: body.imageUrls.length,
-        hasAudio: !!audioUrl,
-        audioMethod: audioUrl ? "elevenlabs" : "none",
+        imageCount: propertyData.imageUrls.length,
+        hasAudio: true,
+        audioMethod: "elevenlabs",
       },
     })
   } catch (error) {
-    console.error("❌ API error:", error)
+    console.error("❌ Video generation error:", error)
     return NextResponse.json(
       {
-        error: "Video generation setup failed",
+        error: "Video generation failed",
         details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },

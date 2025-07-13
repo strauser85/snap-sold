@@ -11,8 +11,7 @@ interface SlideshowConfig {
   images: string[]
   timePerImage: number
   totalDuration: number
-  audioUrl?: string
-  audioMethod?: string
+  audioUrl: string
   format: {
     width: number
     height: number
@@ -52,13 +51,9 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       throw new Error("Invalid ElevenLabs audio format - expected data URL")
     }
 
-    if (config.audioMethod !== "elevenlabs") {
-      throw new Error("Audio method is not ElevenLabs - only ElevenLabs is supported")
-    }
-
     addDebugInfo("✅ ElevenLabs audio validation passed")
     return true
-  }, [config.audioUrl, config.audioMethod, addDebugInfo])
+  }, [config.audioUrl, addDebugInfo])
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -80,8 +75,8 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
     setProgress(0)
     setDebugInfo([])
     setRecordedChunks([])
-    setCurrentStep("Initializing ElevenLabs slideshow generation...")
-    addDebugInfo("Starting ElevenLabs-only slideshow generation")
+    setCurrentStep("Initializing slideshow generation...")
+    addDebugInfo("Starting slideshow generation")
 
     try {
       const canvas = canvasRef.current
@@ -121,7 +116,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       setProgress(30)
 
       const audioElement = new Audio()
-      audioElement.src = config.audioUrl!
+      audioElement.src = config.audioUrl
       audioElement.crossOrigin = "anonymous"
       audioElement.preload = "auto"
 
@@ -199,9 +194,9 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           const videoUrl = await createSafeVideoBlob(chunks)
           setVideoUrl(videoUrl)
           onVideoGenerated(videoUrl)
-          setCurrentStep("ElevenLabs slideshow generated successfully!")
+          setCurrentStep("Slideshow generated successfully!")
           setProgress(100)
-          addDebugInfo("✅ ElevenLabs slideshow generation completed")
+          addDebugInfo("✅ Slideshow generation completed")
         } catch (error) {
           addDebugInfo(`❌ Video creation failed: ${error}`)
           onError(error instanceof Error ? error.message : "Video creation failed")
@@ -240,7 +235,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           // Stop recording and audio
           audioElement.pause()
           mediaRecorder.stop()
-          addDebugInfo("🏁 ElevenLabs slideshow animation completed")
+          addDebugInfo("🏁 Slideshow animation completed")
           return
         }
 
@@ -285,9 +280,9 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
       animate()
     } catch (error) {
-      console.error("ElevenLabs slideshow generation failed:", error)
+      console.error("Slideshow generation failed:", error)
       addDebugInfo(`❌ Generation failed: ${error}`)
-      onError(error instanceof Error ? error.message : "ElevenLabs slideshow generation failed")
+      onError(error instanceof Error ? error.message : "Slideshow generation failed")
       setIsGenerating(false)
     }
   }, [config, onVideoGenerated, onError, validateElevenLabsAudio, loadImage, addDebugInfo])
@@ -300,7 +295,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       mediaRecorderRef.current.stop()
     }
     setIsGenerating(false)
-    addDebugInfo("ElevenLabs generation stopped by user")
+    addDebugInfo("Slideshow generation stopped by user")
   }, [addDebugInfo])
 
   const resetGeneration = useCallback(() => {
@@ -309,7 +304,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
     setCurrentStep("")
     setDebugInfo([])
     setRecordedChunks([])
-    addDebugInfo("ElevenLabs generation reset")
+    addDebugInfo("Slideshow generation reset")
   }, [addDebugInfo])
 
   return (
@@ -326,20 +321,8 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
             </div>
             <div className="text-sm text-green-600 space-y-1">
               <p>✅ ElevenLabs voiceover generated</p>
-              <p>✅ High-quality AI voice</p>
-              <p>✅ No fallback - ElevenLabs only</p>
-            </div>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-blue-700 mb-2">
-              <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">Ready to Generate ElevenLabs Slideshow!</span>
-            </div>
-            <div className="text-sm text-blue-600 space-y-1">
               <p>✅ {config.images.length} images loaded</p>
-              <p>✅ {config.totalDuration}s duration with ElevenLabs audio</p>
-              <p>✅ TikTok format (9:16)</p>
+              <p>✅ {config.totalDuration}s duration</p>
             </div>
           </div>
 
@@ -363,13 +346,13 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           <Alert>
             <Loader2 className="h-4 w-4 animate-spin" />
             <AlertDescription>
-              Generating ElevenLabs slideshow with {config.images.length} images... High-quality AI voice included.
+              Generating slideshow with {config.images.length} images... High-quality AI voice included.
             </AlertDescription>
           </Alert>
 
           <Button onClick={stopGeneration} variant="destructive" className="w-full">
             <Pause className="mr-2 h-4 w-4" />
-            Stop ElevenLabs Generation
+            Stop Generation
           </Button>
 
           {/* Debug Info */}
