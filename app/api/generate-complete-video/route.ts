@@ -185,6 +185,7 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
             },
             output_format: "mp3_44100_128",
             apply_text_normalization: "auto",
+            with_timestamps: true, // Enable word-level timing
           }),
         },
       )
@@ -250,6 +251,7 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
           speaking_rate: 0.85, // 85% speed for better readability
         },
         output_format: "mp3_44100_128",
+        with_timestamps: true, // Enable word-level timing
       }),
     })
 
@@ -425,7 +427,7 @@ function estimateDuration(script: string): number {
   return Math.max(35, (wordCount / (150 * 0.85)) * 60)
 }
 
-// Generate sentence-level captions as fallback with 500ms delay (using original script)
+// Generate sentence-level captions as fallback using estimated timing (no artificial delay)
 function generateSentenceCaptions(
   originalScript: string,
   totalDuration: number,
@@ -435,9 +437,8 @@ function generateSentenceCaptions(
   startTime: number
   endTime: number
 }> {
-  console.log("📝 Generating sentence-level captions with 500ms delay using original script")
+  console.log("📝 Generating sentence-level captions synced to estimated timing")
 
-  // Split into sentences using original script for captions
   const sentences = originalScript
     .replace(/[^\w\s.,!?'-]/g, " ")
     .replace(/\s+/g, " ")
@@ -449,15 +450,12 @@ function generateSentenceCaptions(
 
   if (sentences.length === 0) return captions
 
-  const CAPTION_DELAY = 0.5 // 500ms delay
-  const availableDuration = totalDuration - CAPTION_DELAY
-  const timePerSentence = availableDuration / sentences.length
+  const timePerSentence = totalDuration / sentences.length
 
   sentences.forEach((sentence, index) => {
-    const startTime = CAPTION_DELAY + index * timePerSentence
-    const endTime = startTime + timePerSentence - 0.2 // Small gap between sentences
+    const startTime = index * timePerSentence
+    const endTime = startTime + timePerSentence - 0.2
 
-    // Create dummy word timings for sentence
     const words = sentence.split(/\s+/).map((word, wordIndex) => ({
       word,
       startTime: startTime + wordIndex * 0.3,
@@ -472,11 +470,11 @@ function generateSentenceCaptions(
     })
   })
 
-  console.log(`✅ Generated ${captions.length} sentence-level captions from original script`)
+  console.log(`✅ Generated ${captions.length} sentence-level captions synced to estimated timing`)
   return captions
 }
 
-// Generate word-based captions with 500ms delay
+// Generate word-based captions using actual ElevenLabs timing (no artificial delay)
 function generateWordBasedCaptions(
   wordTimings: WordTiming[],
   totalDuration: number,
@@ -493,8 +491,7 @@ function generateWordBasedCaptions(
     return captions
   }
 
-  const CAPTION_DELAY = 0.5 // 500ms delay
-  const wordsPerCaption = 4 // Smaller chunks for better readability
+  const wordsPerCaption = 3 // Smaller chunks for TikTok-style readability
 
   for (let i = 0; i < wordTimings.length; i += wordsPerCaption) {
     const captionWords = wordTimings.slice(i, i + wordsPerCaption)
@@ -506,13 +503,13 @@ function generateWordBasedCaptions(
           .join(" ")
           .toUpperCase(),
         words: captionWords,
-        startTime: Math.max(0, captionWords[0].startTime + CAPTION_DELAY),
-        endTime: Math.min(totalDuration, captionWords[captionWords.length - 1].endTime + CAPTION_DELAY),
+        startTime: captionWords[0].startTime, // Use actual ElevenLabs timing
+        endTime: captionWords[captionWords.length - 1].endTime, // Use actual ElevenLabs timing
       })
     }
   }
 
-  console.log(`✅ Generated ${captions.length} word-based captions with 500ms delay`)
+  console.log(`✅ Generated ${captions.length} word-based captions synced to ElevenLabs timing`)
   return captions
 }
 
@@ -556,7 +553,7 @@ export async function POST(request: NextRequest) {
     console.log(
       `🎤 Rachel voice: 0.85x speed, voice-optimized text, alignment: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
     )
-    console.log(`📝 Captions: ${captions.length} chunks with 500ms delay from original script`)
+    console.log(`📝 Captions: ${captions.length} chunks synced to actual audio timing`)
 
     // Return everything needed for client-side video generation
     return NextResponse.json({

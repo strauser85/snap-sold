@@ -312,9 +312,7 @@ export default function VideoGenerator() {
             </h1>
             <Sparkles className="h-8 w-8 text-pink-600" />
           </div>
-          <p className="text-lg text-gray-600 leading-relaxed">
-            Create viral TikTok videos with Rachel's AI voice and dynamic captions
-          </p>
+          <p className="text-lg text-gray-600 leading-relaxed">Create viral listing videos that sell homes fast</p>
         </div>
 
         {/* Form */}
@@ -596,15 +594,9 @@ export default function VideoGenerator() {
             <CardContent className="p-6">
               <div className="text-center space-y-4">
                 <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-                  <div className="flex items-center gap-2 text-green-700 mb-3">
+                  <div className="flex items-center justify-center gap-2 text-green-700">
                     <CheckCircle className="h-6 w-6" />
-                    <span className="font-bold text-lg">Video Generated Successfully!</span>
-                  </div>
-                  <div className="text-sm text-green-600 space-y-1">
-                    <p>✅ Rachel's AI voice embedded</p>
-                    <p>✅ TikTok-style captions synced</p>
-                    <p>✅ All {uploadedCount} images included</p>
-                    <p>✅ Ready for social media</p>
+                    <span className="font-bold text-lg">✅ Video Generated Successfully!</span>
                   </div>
                 </div>
 
