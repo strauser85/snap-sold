@@ -19,9 +19,10 @@ import {
   FileText,
   Volume2,
   Upload,
+  Sparkles,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { WorkingSlideshowGenerator } from "@/components/working-slideshow-generator"
+import { FinalVideoGenerator } from "@/components/final-video-generator"
 
 interface GenerationProgress {
   step: string
@@ -30,9 +31,6 @@ interface GenerationProgress {
 
 interface VideoResult {
   videoUrl: string
-  audioUrl?: string
-  script: string
-  listing: any
   metadata: any
 }
 
@@ -62,10 +60,11 @@ export default function VideoGenerator() {
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
+  const [videoConfig, setVideoConfig] = useState<any>(null)
+  const [propertyData, setPropertyData] = useState<any>(null)
   const [showGenerator, setShowGenerator] = useState(false)
 
-  const MAX_IMAGES = 20
+  const MAX_IMAGES = 15
 
   // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
@@ -203,13 +202,13 @@ export default function VideoGenerator() {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
       // Fallback script
-      let basicScript = `🏡 Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of luxurious living space.`
+      let basicScript = `🚨 This property is about to BLOW YOUR MIND! 🚨\n\nWelcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
 
       if (propertyDescription.trim()) {
-        basicScript += ` ${propertyDescription.trim()}`
+        basicScript += `\n\nBut wait, there's more! ${propertyDescription.trim()}`
       }
 
-      basicScript += ` Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Contact me today! 📞✨`
+      basicScript += `\n\nPriced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Don't let this slip away! DM me NOW! 📱✨`
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
@@ -218,7 +217,7 @@ export default function VideoGenerator() {
     }
   }
 
-  const handleGenerateVideo = async () => {
+  const handleGenerateFinalVideo = async () => {
     if (!address || !price || !bedrooms || !bathrooms || !sqft || !generatedScript || uploadedImages.length === 0) {
       setError("Please fill in all details, generate a script, and upload at least one image.")
       return
@@ -236,11 +235,11 @@ export default function VideoGenerator() {
     setProgress(null)
 
     try {
-      setProgress({ step: "Preparing slideshow generation...", progress: 25 })
+      setProgress({ step: "Generating Rachel voiceover and TikTok captions...", progress: 25 })
 
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
-      const response = await fetch("/api/generate-video", {
+      const response = await fetch("/api/generate-final-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -262,24 +261,17 @@ export default function VideoGenerator() {
 
       const data = await response.json()
 
-      if (data.success && data.slideshowConfig) {
-        setSlideshowConfig({
-          images: imageUrls,
-          timePerImage: data.slideshowConfig.timePerImage,
-          totalDuration: data.slideshowConfig.totalDuration,
-          audioUrl: data.slideshowConfig.audioUrl,
-          audioError: data.slideshowConfig.audioError,
-          format: data.slideshowConfig.format,
-        })
-
+      if (data.success && data.videoConfig) {
+        setVideoConfig(data.videoConfig)
+        setPropertyData(data.property)
         setShowGenerator(true)
-        setProgress({ step: "Slideshow generator ready!", progress: 100 })
+        setProgress({ step: "Final video generator ready!", progress: 100 })
       } else {
-        throw new Error("Failed to prepare slideshow")
+        throw new Error("Failed to prepare final video")
       }
     } catch (err) {
       console.error("Generation error:", err)
-      setError(err instanceof Error ? err.message : "Video generation failed")
+      setError(err instanceof Error ? err.message : "Final video generation failed")
     } finally {
       setIsLoading(false)
     }
@@ -299,7 +291,8 @@ export default function VideoGenerator() {
     setResult(null)
     setError(null)
     setProgress(null)
-    setSlideshowConfig(null)
+    setVideoConfig(null)
+    setPropertyData(null)
     setShowGenerator(false)
   }
 
@@ -308,18 +301,28 @@ export default function VideoGenerator() {
   const failedCount = uploadedImages.filter((img) => img.uploadError).length
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl space-y-8">
         {/* Header */}
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">SnapSold</h1>
+          <div className="flex items-center justify-center gap-2">
+            <Sparkles className="h-8 w-8 text-purple-600" />
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent tracking-tight">
+              SnapSold
+            </h1>
+            <Sparkles className="h-8 w-8 text-pink-600" />
+          </div>
           <p className="text-lg text-gray-600 leading-relaxed">
-            Create viral TikTok videos with AI-powered scripts and ElevenLabs voiceover
+            Create viral TikTok videos with Rachel's AI voice and dynamic captions
           </p>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full text-sm font-medium text-purple-700">
+            <Volume2 className="h-4 w-4" />
+            One-Click Video Generation
+          </div>
         </div>
 
         {/* Form */}
-        <Card className="shadow-lg border-0">
+        <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
           <CardContent className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -529,7 +532,7 @@ export default function VideoGenerator() {
             </div>
 
             <Button
-              onClick={handleGenerateVideo}
+              onClick={handleGenerateFinalVideo}
               disabled={
                 isLoading ||
                 !address ||
@@ -542,15 +545,18 @@ export default function VideoGenerator() {
                 uploadingCount > 0 ||
                 uploadedCount === 0
               }
-              className="w-full h-12 text-base font-medium bg-indigo-600 hover:bg-indigo-700"
+              className="w-full h-14 text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Preparing Slideshow...
+                  <Loader2 className="mr-3 h-5 w-5 animate-spin" />
+                  Preparing Final Video...
                 </>
               ) : (
-                `Generate Slideshow (${uploadedCount} images ready)`
+                <>
+                  <Sparkles className="mr-3 h-5 w-5" />
+                  Generate Final Video ({uploadedCount} images)
+                </>
               )}
             </Button>
           </CardContent>
@@ -558,14 +564,14 @@ export default function VideoGenerator() {
 
         {/* Progress */}
         {progress && (
-          <Card className="shadow-lg border-0">
+          <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
             <CardContent className="p-6 space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-600">{progress.step}</span>
                   <span className="text-gray-500">{progress.progress}%</span>
                 </div>
-                <Progress value={progress.progress} className="h-2" />
+                <Progress value={progress.progress} className="h-3" />
               </div>
             </CardContent>
           </Card>
@@ -580,18 +586,18 @@ export default function VideoGenerator() {
         )}
 
         {/* Video Preview */}
-        <Card className="shadow-lg border-0">
+        <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
           <CardContent className="p-6">
-            <div className="aspect-[9/16] bg-gray-100 rounded-lg flex items-center justify-center min-h-[400px] max-w-sm mx-auto">
+            <div className="aspect-[9/16] bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg flex items-center justify-center min-h-[400px] max-w-sm mx-auto">
               {result ? (
                 <div className="text-center space-y-4 w-full">
                   <div className="bg-black rounded-lg aspect-[9/16] flex items-center justify-center relative overflow-hidden">
                     <video src={result.videoUrl} controls className="w-full h-full object-cover" preload="metadata" />
                     <div className="absolute bottom-4 left-4 right-4 text-white bg-black bg-opacity-50 p-2 rounded">
-                      <p className="text-sm font-medium">{result.listing?.address}</p>
+                      <p className="text-sm font-medium">Final TikTok Video</p>
                       <p className="text-xs opacity-80 flex items-center gap-1">
                         <Volume2 className="h-3 w-3" />
-                        Property Slideshow
+                        Rachel Voice + Captions
                       </p>
                     </div>
                   </div>
@@ -600,24 +606,25 @@ export default function VideoGenerator() {
                     <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
                       Generate Another
                     </Button>
-                    <Button asChild className="flex-1">
-                      <a href={result.videoUrl} download="property-slideshow.webm">
+                    <Button
+                      asChild
+                      className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
+                    >
+                      <a href={result.videoUrl} download="final-tiktok-video.webm">
                         <Download className="mr-2 h-4 w-4" />
                         Download
                       </a>
                     </Button>
                   </div>
                 </div>
-              ) : showGenerator && slideshowConfig ? (
-                <WorkingSlideshowGenerator
-                  config={slideshowConfig}
+              ) : showGenerator && videoConfig && propertyData ? (
+                <FinalVideoGenerator
+                  config={videoConfig}
+                  property={propertyData}
                   onVideoGenerated={(videoUrl) => {
                     setResult({
                       videoUrl,
-                      audioUrl: slideshowConfig.audioUrl,
-                      script: generatedScript,
-                      listing: { address, price: Number(price) },
-                      metadata: { imageCount: slideshowConfig.images.length },
+                      metadata: { type: "final-video" },
                     })
                     setShowGenerator(false)
                   }}
@@ -627,12 +634,14 @@ export default function VideoGenerator() {
                   }}
                 />
               ) : (
-                <div className="text-center space-y-2">
-                  <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
-                    <Play className="h-6 w-6 text-gray-400" />
+                <div className="text-center space-y-3">
+                  <div className="w-20 h-20 bg-gradient-to-br from-purple-200 to-pink-200 rounded-full flex items-center justify-center mx-auto">
+                    <Play className="h-8 w-8 text-purple-600" />
                   </div>
-                  <p className="text-sm text-gray-500">Your slideshow will appear here</p>
-                  <p className="text-xs text-gray-400">ElevenLabs voiceover included</p>
+                  <div>
+                    <p className="text-sm text-gray-600 font-medium">Your final video will appear here</p>
+                    <p className="text-xs text-gray-400 mt-1">Rachel voice + TikTok captions + All images</p>
+                  </div>
                 </div>
               )}
             </div>
