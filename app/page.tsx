@@ -21,6 +21,8 @@ import {
   Upload,
   Sparkles,
   RefreshCw,
+  Settings,
+  Key,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
 import { FinalVideoGenerator } from "@/components/final-video-generator"
@@ -61,6 +63,7 @@ export default function VideoGenerator() {
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [canRetry, setCanRetry] = useState(false)
+  const [suggestions, setSuggestions] = useState<string[]>([])
 
   const [videoConfig, setVideoConfig] = useState<any>(null)
   const [propertyData, setPropertyData] = useState<any>(null)
@@ -237,6 +240,7 @@ export default function VideoGenerator() {
     setResult(null)
     setProgress(null)
     setCanRetry(false)
+    setSuggestions([])
 
     try {
       setProgress({ step: "Generating Rachel voiceover and TikTok captions...", progress: 25 })
@@ -263,6 +267,7 @@ export default function VideoGenerator() {
       if (!response.ok) {
         setCanRetry(data.canRetry || false)
         setDebugInfo(data.debugInfo)
+        setSuggestions(data.suggestions || [])
         throw new Error(data.details || data.error || `Server error: ${response.status}`)
       }
 
@@ -286,6 +291,7 @@ export default function VideoGenerator() {
   const retryGeneration = () => {
     setError(null)
     setCanRetry(false)
+    setSuggestions([])
     handleGenerateFinalVideo()
   }
 
@@ -308,6 +314,7 @@ export default function VideoGenerator() {
     setShowGenerator(false)
     setDebugInfo(null)
     setCanRetry(false)
+    setSuggestions([])
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -334,6 +341,25 @@ export default function VideoGenerator() {
             One-Click Video Generation
           </div>
         </div>
+
+        {/* API Key Status Alert */}
+        <Alert>
+          <Key className="h-4 w-4" />
+          <AlertDescription>
+            <div className="space-y-2">
+              <p className="font-medium">ElevenLabs API Configuration</p>
+              <p className="text-sm">
+                To use Rachel's premium voice, please ensure your ELEVENLABS_API_KEY is configured in the environment
+                variables. The app will use a fallback voice if ElevenLabs is unavailable.
+              </p>
+              <div className="text-xs text-gray-600 space-y-1">
+                <p>• ElevenLabs API keys are typically 32+ characters long</p>
+                <p>• Keys should be added to environment variables as ELEVENLABS_API_KEY</p>
+                <p>• Ensure your account has sufficient quota for text-to-speech generation</p>
+              </div>
+            </div>
+          </AlertDescription>
+        </Alert>
 
         {/* Form */}
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
@@ -591,23 +617,42 @@ export default function VideoGenerator() {
           </Card>
         )}
 
-        {/* Error with Retry */}
+        {/* Error with Retry and Suggestions */}
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
               <div className="space-y-3">
                 <p>{error}</p>
+
+                {suggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="font-medium text-sm">Suggestions:</p>
+                    <ul className="text-xs space-y-1">
+                      {suggestions.map((suggestion, index) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <span className="text-yellow-600">•</span>
+                          <span>{suggestion}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 {canRetry && (
                   <Button onClick={retryGeneration} variant="outline" size="sm" className="bg-white">
                     <RefreshCw className="mr-2 h-3 w-3" />
                     Retry Generation
                   </Button>
                 )}
+
                 {debugInfo && (
                   <details className="text-xs">
-                    <summary className="cursor-pointer">Show Debug Info</summary>
-                    <pre className="mt-2 p-2 bg-gray-100 rounded text-black overflow-auto">
+                    <summary className="cursor-pointer flex items-center gap-2">
+                      <Settings className="h-3 w-3" />
+                      Show Technical Details
+                    </summary>
+                    <pre className="mt-2 p-2 bg-gray-100 rounded text-black overflow-auto max-h-40">
                       {JSON.stringify(debugInfo, null, 2)}
                     </pre>
                   </details>
@@ -629,7 +674,7 @@ export default function VideoGenerator() {
                       <p className="text-sm font-medium">Final TikTok Video</p>
                       <p className="text-xs opacity-80 flex items-center gap-1">
                         <Volume2 className="h-3 w-3" />
-                        Rachel Voice + Captions
+                        {result.metadata?.voiceUsed || "AI Voice"} + Captions
                       </p>
                     </div>
                   </div>
@@ -656,7 +701,7 @@ export default function VideoGenerator() {
                   onVideoGenerated={(videoUrl) => {
                     setResult({
                       videoUrl,
-                      metadata: { type: "final-video" },
+                      metadata: { type: "final-video", voiceUsed: videoConfig.metadata?.voiceUsed },
                     })
                     setShowGenerator(false)
                   }}

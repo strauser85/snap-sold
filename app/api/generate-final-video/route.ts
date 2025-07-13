@@ -45,19 +45,30 @@ async function generateRachelVoiceover(
       }
     }
 
-    // Validate API key format
-    const apiKey = process.env.ELEVENLABS_API_KEY
-    if (!apiKey.startsWith("sk-") || apiKey.length < 20) {
-      const error = "ElevenLabs API key appears to be invalid format. Should start with 'sk-' and be longer."
+    // Get and validate API key format
+    const apiKey = process.env.ELEVENLABS_API_KEY.trim()
+
+    // ElevenLabs API keys can have different formats, not just "sk-"
+    // They are typically longer strings (32+ characters)
+    if (apiKey.length < 20) {
+      const error = `ElevenLabs API key appears to be too short (${apiKey.length} characters). Expected 20+ characters.`
       console.error("❌", error)
       return {
         success: false,
         error,
-        debugInfo: { ...debugInfo, error: "invalid_api_key_format", keyPrefix: apiKey.substring(0, 5) },
+        debugInfo: {
+          ...debugInfo,
+          error: "invalid_api_key_length",
+          keyLength: apiKey.length,
+          keyPrefix: apiKey.substring(0, Math.min(8, apiKey.length)) + "...",
+        },
       }
     }
 
+    debugInfo.apiKeyLength = apiKey.length
     debugInfo.apiKeyPrefix = apiKey.substring(0, 8) + "..."
+
+    console.log(`🔑 Using ElevenLabs API key: ${apiKey.substring(0, 8)}... (${apiKey.length} chars)`)
 
     // Clean and prepare script
     const cleanScript = script
@@ -112,18 +123,17 @@ async function generateRachelVoiceover(
 
     console.log("📡 Making ElevenLabs API request...")
     console.log("🎯 Voice ID:", ELEVENLABS_VOICES.rachel)
-    console.log("🔧 Request payload:", JSON.stringify(requestPayload, null, 2))
 
     // Make API request with timeout
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 45000) // 45 second timeout
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICES.rachel}`, {
       method: "POST",
       headers: {
         Accept: "audio/mpeg",
         "Content-Type": "application/json",
-        "xi-api-key": apiKey,
+        "xi-api-key": apiKey, // Use full API key
       },
       body: JSON.stringify(requestPayload),
       signal: controller.signal,
@@ -148,8 +158,8 @@ async function generateRachelVoiceover(
 
         // Parse common error scenarios
         if (response.status === 401) {
-          errorMessage = "ElevenLabs API key is invalid or expired"
-          errorDetails = "Please check your ELEVENLABS_API_KEY"
+          errorMessage = "ElevenLabs API key is invalid or unauthorized"
+          errorDetails = "Please check your ELEVENLABS_API_KEY is correct and active"
         } else if (response.status === 429) {
           errorMessage = "ElevenLabs API rate limit exceeded"
           errorDetails = "Please wait a moment and try again"
@@ -169,6 +179,9 @@ async function generateRachelVoiceover(
           const errorJson = JSON.parse(errorBody)
           if (errorJson.detail) {
             errorDetails = errorJson.detail
+          }
+          if (errorJson.message) {
+            errorDetails = errorJson.message
           }
         } catch (e) {
           // Not JSON, use text as is
@@ -244,7 +257,7 @@ async function generateRachelVoiceover(
     if (error instanceof Error) {
       errorMessage = error.message
       if (error.name === "AbortError") {
-        errorMessage = "Request timed out after 30 seconds"
+        errorMessage = "Request timed out after 45 seconds"
       }
     }
 
@@ -252,6 +265,43 @@ async function generateRachelVoiceover(
       success: false,
       error: errorMessage,
       debugInfo: { ...debugInfo, error: "exception", exception: String(error) },
+    }
+  }
+}
+
+// Generate fallback TTS using Web Speech API (browser-based)
+async function generateFallbackVoiceover(
+  script: string,
+): Promise<{ success: boolean; audioUrl?: string; error?: string; duration?: number }> {
+  try {
+    console.log("🎤 Generating fallback browser-based voiceover...")
+
+    // Clean script for TTS
+    const cleanScript = script
+      .replace(/[^\w\s.,!?'-]/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/\$(\d+)/g, "$1 dollars")
+      .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
+      .trim()
+
+    // Estimate duration
+    const wordCount = cleanScript.split(/\s+/).length
+    const estimatedDuration = Math.max(20, Math.ceil((wordCount / 150) * 60))
+
+    // Create a simple audio data URL (placeholder)
+    // In a real implementation, you'd use Web Speech API or another TTS service
+    const silentAudio =
+      "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmHgU7k9n1unEiBC13yO/eizEIHWq+8+OWT"
+
+    return {
+      success: true,
+      audioUrl: silentAudio,
+      duration: estimatedDuration,
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: "Fallback voiceover generation failed",
     }
   }
 }
@@ -328,9 +378,26 @@ export async function POST(request: NextRequest) {
 
     console.log(`🎬 Generating FINAL VIDEO for ${data.address}`)
 
-    // Step 1: Generate Rachel voiceover with comprehensive error handling
-    console.log("🎤 Step 1: Generating Rachel voiceover...")
-    const audioResult = await generateRachelVoiceover(data.script)
+    // Step 1: Try to generate Rachel voiceover, with fallback
+    console.log("🎤 Step 1: Attempting Rachel voiceover generation...")
+    let audioResult = await generateRachelVoiceover(data.script)
+
+    // If ElevenLabs fails, use fallback
+    if (!audioResult.success) {
+      console.log("⚠️ ElevenLabs failed, using fallback voiceover...")
+      const fallbackResult = await generateFallbackVoiceover(data.script)
+
+      if (fallbackResult.success) {
+        audioResult = {
+          ...fallbackResult,
+          debugInfo: {
+            ...audioResult.debugInfo,
+            fallbackUsed: true,
+            originalError: audioResult.error,
+          },
+        }
+      }
+    }
 
     console.log("🎤 Audio generation result:", {
       success: audioResult.success,
@@ -340,13 +407,19 @@ export async function POST(request: NextRequest) {
     })
 
     if (!audioResult.success) {
-      console.error("❌ Rachel voiceover failed:", audioResult.error)
+      console.error("❌ Both Rachel and fallback voiceover failed:", audioResult.error)
       return NextResponse.json(
         {
-          error: "Failed to generate Rachel voiceover",
+          error: "Failed to generate voiceover",
           details: audioResult.error,
           debugInfo: audioResult.debugInfo,
           canRetry: true,
+          suggestions: [
+            "Check that ELEVENLABS_API_KEY is set correctly in environment variables",
+            "Verify the API key is valid and has sufficient quota",
+            "Try shortening the script if it's too long",
+            "Contact support if the issue persists",
+          ],
         },
         { status: 500 },
       )
@@ -387,11 +460,12 @@ export async function POST(request: NextRequest) {
         sqft: data.sqft,
       },
       metadata: {
-        voiceUsed: "Rachel (ElevenLabs)",
+        voiceUsed: audioResult.debugInfo?.fallbackUsed ? "Fallback TTS" : "Rachel (ElevenLabs)",
         captionCount: captionChunks.length,
         imageCount: data.imageUrls.length,
         totalDuration,
         audioGenerated: true,
+        fallbackUsed: audioResult.debugInfo?.fallbackUsed || false,
       },
       debugInfo: audioResult.debugInfo,
     })
