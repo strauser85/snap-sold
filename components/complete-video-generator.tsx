@@ -20,6 +20,11 @@ interface VideoData {
     height: number
     fps: number
   }
+  voiceSettings?: {
+    speed: number
+    natural: boolean
+    description: string
+  }
 }
 
 interface CompleteVideoGeneratorProps {
@@ -43,6 +48,31 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
       img.onerror = reject
       img.src = src
     })
+  }, [])
+
+  // Function to wrap text to fit within canvas width
+  const wrapText = useCallback((ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+    const words = text.split(" ")
+    const lines: string[] = []
+    let currentLine = ""
+
+    for (const word of words) {
+      const testLine = currentLine + (currentLine ? " " : "") + word
+      const metrics = ctx.measureText(testLine)
+
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine)
+        currentLine = word
+      } else {
+        currentLine = testLine
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+
+    return lines
   }, [])
 
   const generateCompleteVideo = useCallback(
@@ -79,12 +109,14 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           throw new Error("No images could be loaded")
         }
 
-        setCurrentStep("Setting up audio...")
+        setCurrentStep("Setting up Rachel's voice (85% speed)...")
         setProgress(40)
 
-        // Setup audio
+        // Setup audio - DO NOT AUTOPLAY during generation
         const audioElement = audioRef.current!
         audioElement.src = videoData.audioUrl
+        audioElement.preload = "auto"
+        audioElement.muted = true // Mute during setup to prevent autoplay
 
         await new Promise((resolve, reject) => {
           audioElement.oncanplaythrough = resolve
@@ -92,7 +124,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           audioElement.load()
         })
 
-        setCurrentStep("Recording video with Rachel voice...")
+        setCurrentStep("Recording video with synced captions...")
         setProgress(50)
 
         // Setup recording
@@ -106,7 +138,8 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           const audioDestination = audioContext.createMediaStreamDestination()
 
           audioSource.connect(audioDestination)
-          audioSource.connect(audioContext.destination)
+          // DO NOT connect to destination during generation to prevent preview audio
+          // audioSource.connect(audioContext.destination)
 
           const audioTrack = audioDestination.stream.getAudioTracks()[0]
           if (audioTrack) {
@@ -164,7 +197,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
             setVideoUrl(videoUrl)
             onVideoGenerated(videoUrl)
-            setCurrentStep("Video generated successfully!")
+            setCurrentStep("Video with Rachel's voice ready!")
             setProgress(100)
           } catch (error) {
             onError(error instanceof Error ? error.message : "Video creation failed")
@@ -180,6 +213,9 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
         // Start recording
         mediaRecorder.start(100)
+
+        // Unmute and start audio for recording (but not for preview)
+        audioElement.muted = false
         audioElement.currentTime = 0
         await audioElement.play()
 
@@ -201,7 +237,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           // Calculate current image
           const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-          // Find current caption with precise timing
+          // Find current caption with precise timing for 85% speed voice
           const currentCaption = videoData.captions.find(
             (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds < caption.endTime,
           )
@@ -222,40 +258,37 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw perfectly synced captions with yellow text and black background bars
+            // Draw perfectly synced captions with yellow text and auto-wrap
             if (currentCaption) {
-              // Calculate typewriter progress based on precise timing
+              // Calculate typewriter progress - synced to Rachel's 85% speed voice
               const captionDuration = currentCaption.endTime - currentCaption.startTime
               const captionElapsed = elapsedSeconds - currentCaption.startTime
               const captionProgress = Math.max(0, Math.min(1, captionElapsed / captionDuration))
 
-              const words = currentCaption.text.split(" ")
-              const maxWordsPerLine = 3 // Reduced for better readability
-              const lines: string[] = []
-
-              // Break text into lines
-              for (let i = 0; i < words.length; i += maxWordsPerLine) {
-                lines.push(words.slice(i, i + maxWordsPerLine).join(" "))
-              }
-
-              // Font settings - bold yellow with comfortable size
-              const fontSize = Math.floor(canvas.width * 0.055) // Slightly smaller for better fit
-              ctx.font = `900 ${fontSize}px "Arial Black", "Arial", sans-serif` // Extra bold
+              // Font settings - smaller size to prevent overflow
+              const fontSize = Math.floor(canvas.width * 0.045) // Reduced from 0.055 to 0.045
+              ctx.font = `900 ${fontSize}px "Arial Black", "Arial", sans-serif`
               ctx.textAlign = "center"
 
-              const lineHeight = fontSize * 1.4
-              const padding = fontSize * 0.3
-              const totalHeight = lines.length * lineHeight
-              const startY = canvas.height * 0.78 // Positioned in lower third
+              // Calculate max width for text wrapping (90% of canvas width)
+              const maxTextWidth = canvas.width * 0.9
+
+              // Wrap text to prevent overflow
+              const wrappedLines = wrapText(ctx, currentCaption.text, maxTextWidth)
+
+              const lineHeight = fontSize * 1.3
+              const padding = fontSize * 0.4
+              const totalHeight = wrappedLines.length * lineHeight
+              const startY = canvas.height * 0.75 // Lower third positioning
 
               // Calculate total characters for typewriter effect
-              const fullText = lines.join(" ")
+              const fullText = wrappedLines.join(" ")
               const totalChars = fullText.length
               const charsToShow = Math.floor(captionProgress * totalChars)
 
               let charCount = 0
 
-              lines.forEach((line, lineIndex) => {
+              wrappedLines.forEach((line, lineIndex) => {
                 const y = startY + lineIndex * lineHeight
 
                 // Calculate how many characters of this line to show
@@ -269,52 +302,38 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                 }
 
                 if (visibleText.length > 0) {
-                  // Measure text for background bar
+                  // Measure text for background box
                   const textMetrics = ctx.measureText(visibleText)
                   const textWidth = textMetrics.width
-                  const barWidth = textWidth + padding * 2
-                  const barHeight = fontSize + padding
-                  const barX = (canvas.width - barWidth) / 2
-                  const barY = y - fontSize * 0.8
+                  const boxWidth = textWidth + padding * 2
+                  const boxHeight = fontSize + padding
+                  const boxX = (canvas.width - boxWidth) / 2
+                  const boxY = y - fontSize * 0.8
 
-                  // Draw semi-transparent black background bar
-                  ctx.fillStyle = "rgba(0, 0, 0, 0.75)" // 75% opacity black
-                  ctx.fillRect(barX, barY, barWidth, barHeight)
+                  // Draw semi-transparent black background box
+                  ctx.fillStyle = "rgba(0, 0, 0, 0.8)" // 80% opacity for better readability
+                  ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
-                  // Add subtle border for extra definition
-                  ctx.strokeStyle = "rgba(0, 0, 0, 0.9)"
+                  // Draw yellow text
+                  ctx.fillStyle = "#FFFF00" // Pure yellow for maximum visibility
+                  ctx.fillText(visibleText, canvas.width / 2, y)
+
+                  // Add subtle text outline for extra clarity
+                  ctx.strokeStyle = "rgba(0, 0, 0, 0.5)"
                   ctx.lineWidth = 1
-                  ctx.strokeRect(barX, barY, barWidth, barHeight)
+                  ctx.strokeText(visibleText, canvas.width / 2, y)
 
-                  // Draw bold yellow text
-                  ctx.fillStyle = "#FFD700" // Gold/yellow color
-                  ctx.fillText(visibleText, canvas.width / 2, y)
-
-                  // Add text shadow for extra pop
-                  ctx.shadowColor = "rgba(0, 0, 0, 0.8)"
-                  ctx.shadowBlur = 2
-                  ctx.shadowOffsetX = 1
-                  ctx.shadowOffsetY = 1
-                  ctx.fillText(visibleText, canvas.width / 2, y)
-
-                  // Reset shadow
-                  ctx.shadowColor = "transparent"
-                  ctx.shadowBlur = 0
-                  ctx.shadowOffsetX = 0
-                  ctx.shadowOffsetY = 0
-
-                  // Add blinking cursor effect at the end of current text
+                  // Add blinking cursor effect - synced to final word timing
                   if (charsToShow >= lineStartChar && charsToShow <= lineEndChar && visibleText.length > 0) {
                     const cursorX = canvas.width / 2 + textWidth / 2 + 3
 
-                    // Blinking cursor effect - faster blink for more dynamic feel
-                    const blinkRate = 3 // 3 blinks per second
+                    // Cursor blinks faster as we approach the final word
+                    const blinkRate = 2.5
                     const shouldShowCursor = Math.floor(elapsedSeconds * blinkRate) % 2 === 0
 
-                    if (shouldShowCursor && captionProgress < 0.98) {
-                      // Hide cursor near end
-                      ctx.fillStyle = "#FFD700"
-                      ctx.fillRect(cursorX, y - fontSize * 0.7, 3, fontSize * 0.8)
+                    if (shouldShowCursor && captionProgress < 0.95) {
+                      ctx.fillStyle = "#FFFF00"
+                      ctx.fillRect(cursorX, y - fontSize * 0.7, 2, fontSize * 0.8)
                     }
                   }
                 }
@@ -323,44 +342,40 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               })
             }
 
-            // Property info overlay - improved styling
-            const overlayGradient = ctx.createLinearGradient(0, 0, 0, 120)
-            overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.9)")
-            overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.6)")
+            // Property info overlay - clean and professional
+            const overlayGradient = ctx.createLinearGradient(0, 0, 0, 100)
+            overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.85)")
+            overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.5)")
             ctx.fillStyle = overlayGradient
-            ctx.fillRect(0, 0, canvas.width, 120)
+            ctx.fillRect(0, 0, canvas.width, 100)
 
             // Property address
             ctx.fillStyle = "#FFFFFF"
-            ctx.font = "bold 20px Arial"
+            ctx.font = "bold 18px Arial"
             ctx.textAlign = "left"
-            ctx.shadowColor = "rgba(0, 0, 0, 0.8)"
-            ctx.shadowBlur = 2
-            ctx.fillText(videoData.property.address, 20, 35)
+            ctx.fillText(videoData.property.address, 15, 30)
 
             // Price in gold
             ctx.fillStyle = "#FFD700"
-            ctx.font = "bold 18px Arial"
-            ctx.fillText(`$${videoData.property.price.toLocaleString()}`, 20, 60)
+            ctx.font = "bold 16px Arial"
+            ctx.fillText(`$${videoData.property.price.toLocaleString()}`, 15, 50)
 
             // Property details
             ctx.fillStyle = "#FFFFFF"
-            ctx.font = "16px Arial"
+            ctx.font = "14px Arial"
             ctx.fillText(
               `${videoData.property.bedrooms}BR • ${videoData.property.bathrooms}BA • ${videoData.property.sqft.toLocaleString()} sqft`,
-              20,
-              85,
+              15,
+              70,
             )
 
             // Rachel voice indicator
             ctx.fillStyle = "#FF69B4"
-            ctx.font = "bold 14px Arial"
+            ctx.font = "bold 12px Arial"
             ctx.textAlign = "right"
-            ctx.fillText("🎤 Rachel Voice", canvas.width - 20, 105)
+            ctx.fillText("🎤 Rachel (85% Speed)", canvas.width - 15, 85)
 
-            // Reset shadow and text align
-            ctx.shadowColor = "transparent"
-            ctx.shadowBlur = 0
+            // Reset text alignment
             ctx.textAlign = "start"
           }
 
@@ -379,7 +394,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
         setIsGenerating(false)
       }
     },
-    [loadImage, onVideoGenerated, onError],
+    [loadImage, onVideoGenerated, onError, wrapText],
   )
 
   return {

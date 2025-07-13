@@ -11,10 +11,10 @@ interface VideoRequest {
   imageUrls: string[]
 }
 
-// Generate ElevenLabs Rachel voiceover
+// Generate ElevenLabs Rachel voiceover with slower speed
 async function generateRachelVoice(script: string): Promise<{ success: boolean; audioUrl?: string; error?: string }> {
   try {
-    console.log("🎤 Generating Rachel voiceover...")
+    console.log("🎤 Generating Rachel voiceover at 85% speed...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -50,6 +50,7 @@ async function generateRachelVoice(script: string): Promise<{ success: boolean; 
           similarity_boost: 0.85,
           style: 0.25,
           use_speaker_boost: true,
+          speaking_rate: 0.85, // 85% speed - slower but natural
         },
         output_format: "mp3_44100_128",
       }),
@@ -70,7 +71,7 @@ async function generateRachelVoice(script: string): Promise<{ success: boolean; 
     const base64Audio = Buffer.from(arrayBuffer).toString("base64")
     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
-    console.log("✅ Rachel voice generated successfully")
+    console.log("✅ Rachel voice generated successfully at 85% speed")
     return { success: true, audioUrl: audioDataUrl }
   } catch (error) {
     console.error("❌ Rachel voice failed:", error)
@@ -78,37 +79,43 @@ async function generateRachelVoice(script: string): Promise<{ success: boolean; 
   }
 }
 
-// Generate TikTok captions
+// Generate TikTok captions with better timing for 85% speed voice
 function generateTikTokCaptions(script: string, duration: number) {
   const cleanText = script
     .replace(/[^\w\s.,!?'-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
+
+  // Split by sentences and phrases for better sync
   const sentences = cleanText.split(/[.!?]+/).filter((s) => s.trim().length > 0)
   const captions: Array<{ text: string; startTime: number; endTime: number }> = []
 
   let currentTime = 0
   const totalWords = cleanText.split(/\s+/).length
-  const wordsPerSecond = totalWords / duration
+
+  // Adjust words per second for 85% speed (slower speech)
+  const baseWordsPerSecond = 2.2 // Slower than normal 2.5 wps
+  const wordsPerSecond = baseWordsPerSecond * 0.85 // Account for 85% speed
 
   sentences.forEach((sentence) => {
     const words = sentence.trim().split(/\s+/)
 
-    if (words.length > 4) {
-      // Break into chunks of 4 words max
+    if (words.length > 6) {
+      // Break long sentences into smaller chunks for better readability
       for (let i = 0; i < words.length; i += 4) {
         const chunk = words.slice(i, i + 4).join(" ")
-        const chunkDuration = Math.max(1.5, chunk.split(/\s+/).length / wordsPerSecond)
+        const chunkWords = chunk.split(/\s+/).length
+        const chunkDuration = Math.max(2.0, chunkWords / wordsPerSecond) // Minimum 2s per chunk
 
         captions.push({
-          text: chunk.toUpperCase(),
+          text: chunk.trim().toUpperCase(),
           startTime: currentTime,
           endTime: currentTime + chunkDuration,
         })
         currentTime += chunkDuration
       }
     } else {
-      const chunkDuration = Math.max(1.5, words.length / wordsPerSecond)
+      const chunkDuration = Math.max(2.0, words.length / wordsPerSecond)
       captions.push({
         text: sentence.trim().toUpperCase(),
         startTime: currentTime,
@@ -136,21 +143,23 @@ export async function POST(request: NextRequest) {
     console.log(`🖼️ Images: ${data.imageUrls.length}`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
-    // Step 1: Generate Rachel voice
+    // Step 1: Generate Rachel voice at 85% speed
     const audioResult = await generateRachelVoice(data.script)
     if (!audioResult.success) {
       return NextResponse.json({ error: `Voice generation failed: ${audioResult.error}` }, { status: 500 })
     }
 
-    // Step 2: Calculate timing
+    // Step 2: Calculate timing for 85% speed voice
     const wordCount = data.script.split(" ").length
-    const estimatedDuration = Math.max(30, Math.ceil((wordCount / 150) * 60))
+    // Adjust duration calculation for slower speech
+    const estimatedDuration = Math.max(35, Math.ceil((wordCount / (150 * 0.85)) * 60)) // 85% of normal speed
     const timePerImage = Math.max(3, Math.floor(estimatedDuration / data.imageUrls.length))
 
-    // Step 3: Generate captions
+    // Step 3: Generate captions with precise timing for slower voice
     const captions = generateTikTokCaptions(data.script, estimatedDuration)
 
     console.log(`📊 Video: ${estimatedDuration}s duration, ${timePerImage}s per image, ${captions.length} captions`)
+    console.log(`🎤 Rachel voice: 85% speed for natural, clear delivery`)
 
     // Return everything needed for client-side video generation
     return NextResponse.json({
@@ -171,6 +180,11 @@ export async function POST(request: NextRequest) {
         width: 576,
         height: 1024,
         fps: 30,
+      },
+      voiceSettings: {
+        speed: 0.85,
+        natural: true,
+        description: "Rachel voice at 85% speed for clear, natural delivery",
       },
     })
   } catch (error) {
