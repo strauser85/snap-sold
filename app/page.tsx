@@ -21,7 +21,7 @@ import {
   Upload,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { CanvasSlideshowGenerator } from "@/components/canvas-slideshow-generator"
+import { WorkingSlideshowGenerator } from "@/components/working-slideshow-generator"
 
 interface GenerationProgress {
   step: string
@@ -30,7 +30,7 @@ interface GenerationProgress {
 
 interface VideoResult {
   videoUrl: string
-  audioUrl: string
+  audioUrl?: string
   script: string
   listing: any
   metadata: any
@@ -63,7 +63,7 @@ export default function VideoGenerator() {
   const [error, setError] = useState<string | null>(null)
 
   const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
-  const [showCanvasGenerator, setShowCanvasGenerator] = useState(false)
+  const [showGenerator, setShowGenerator] = useState(false)
 
   const MAX_IMAGES = 20
 
@@ -267,12 +267,13 @@ export default function VideoGenerator() {
           images: imageUrls,
           timePerImage: data.slideshowConfig.timePerImage,
           totalDuration: data.slideshowConfig.totalDuration,
-          audioUrl: data.audioUrl,
+          audioUrl: data.slideshowConfig.audioUrl,
+          audioError: data.slideshowConfig.audioError,
           format: data.slideshowConfig.format,
         })
 
-        setShowCanvasGenerator(true)
-        setProgress({ step: "Canvas slideshow ready!", progress: 100 })
+        setShowGenerator(true)
+        setProgress({ step: "Slideshow generator ready!", progress: 100 })
       } else {
         throw new Error("Failed to prepare slideshow")
       }
@@ -299,7 +300,7 @@ export default function VideoGenerator() {
     setError(null)
     setProgress(null)
     setSlideshowConfig(null)
-    setShowCanvasGenerator(false)
+    setShowGenerator(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -590,7 +591,7 @@ export default function VideoGenerator() {
                       <p className="text-sm font-medium">{result.listing?.address}</p>
                       <p className="text-xs opacity-80 flex items-center gap-1">
                         <Volume2 className="h-3 w-3" />
-                        ElevenLabs Slideshow
+                        Property Slideshow
                       </p>
                     </div>
                   </div>
@@ -600,15 +601,15 @@ export default function VideoGenerator() {
                       Generate Another
                     </Button>
                     <Button asChild className="flex-1">
-                      <a href={result.videoUrl} download="elevenlabs-slideshow.webm">
+                      <a href={result.videoUrl} download="property-slideshow.webm">
                         <Download className="mr-2 h-4 w-4" />
                         Download
                       </a>
                     </Button>
                   </div>
                 </div>
-              ) : showCanvasGenerator && slideshowConfig ? (
-                <CanvasSlideshowGenerator
+              ) : showGenerator && slideshowConfig ? (
+                <WorkingSlideshowGenerator
                   config={slideshowConfig}
                   onVideoGenerated={(videoUrl) => {
                     setResult({
@@ -618,11 +619,11 @@ export default function VideoGenerator() {
                       listing: { address, price: Number(price) },
                       metadata: { imageCount: slideshowConfig.images.length },
                     })
-                    setShowCanvasGenerator(false)
+                    setShowGenerator(false)
                   }}
                   onError={(error) => {
                     setError(error)
-                    setShowCanvasGenerator(false)
+                    setShowGenerator(false)
                   }}
                 />
               ) : (
