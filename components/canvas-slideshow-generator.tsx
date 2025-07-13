@@ -39,7 +39,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
     setIsGenerating(true)
     setProgress(0)
-    setCurrentStep("Initializing Canvas slideshow...")
+    setCurrentStep("Initializing Canvas slideshow with audio...")
 
     try {
       const canvas = canvasRef.current
@@ -65,16 +65,57 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
         })
 
         loadedImages.push(img)
-        setProgress(10 + (i / config.images.length) * 30)
+        setProgress(10 + (i / config.images.length) * 20)
       }
 
-      setCurrentStep(`Creating slideshow with ${loadedImages.length} images...`)
-      setProgress(40)
+      setCurrentStep("Setting up audio and video recording...")
+      setProgress(30)
 
-      // Set up MediaRecorder
-      const stream = canvas.captureStream(config.format.fps)
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp9",
+      // Create video stream from canvas
+      const videoStream = canvas.captureStream(config.format.fps)
+
+      // Create audio context and load audio if available
+      let audioContext: AudioContext | null = null
+      let audioBuffer: AudioBuffer | null = null
+      let combinedStream = videoStream
+
+      if (config.audioUrl) {
+        try {
+          setCurrentStep("Loading AI voiceover audio...")
+          setProgress(35)
+
+          // Load audio file
+          const audioResponse = await fetch(config.audioUrl)
+          const audioArrayBuffer = await audioResponse.arrayBuffer()
+
+          // Create audio context
+          audioContext = new AudioContext()
+          audioBuffer = await audioContext.decodeAudioData(audioArrayBuffer)
+
+          // Create audio stream
+          const audioDestination = audioContext.createMediaStreamDestination()
+          const audioSource = audioContext.createBufferSource()
+          audioSource.buffer = audioBuffer
+          audioSource.connect(audioDestination)
+
+          // Combine video and audio streams
+          const audioTrack = audioDestination.stream.getAudioTracks()[0]
+          const videoTrack = videoStream.getVideoTracks()[0]
+
+          combinedStream = new MediaStream([videoTrack, audioTrack])
+
+          console.log("✅ Audio loaded and combined with video stream")
+          setCurrentStep("Audio and video streams combined!")
+          setProgress(40)
+        } catch (audioError) {
+          console.warn("Audio loading failed, continuing with video only:", audioError)
+          setCurrentStep("Audio failed, creating video-only slideshow...")
+        }
+      }
+
+      // Set up MediaRecorder with combined stream
+      const mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: "video/webm;codecs=vp9,opus",
       })
 
       const chunks: Blob[] = []
@@ -89,15 +130,29 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
         const url = URL.createObjectURL(blob)
         setVideoUrl(url)
         onVideoGenerated(url)
-        setCurrentStep("Slideshow completed!")
+        setCurrentStep("Slideshow with audio completed!")
         setProgress(100)
         setIsGenerating(false)
+
+        // Clean up audio context
+        if (audioContext) {
+          audioContext.close()
+        }
       }
 
       // Start recording
       mediaRecorder.start()
-      setCurrentStep("Recording slideshow...")
+      setCurrentStep("Recording slideshow with audio...")
       setProgress(50)
+
+      // Start audio playback if available
+      if (audioContext && audioBuffer) {
+        const audioSource = audioContext.createBufferSource()
+        audioSource.buffer = audioBuffer
+        audioSource.connect(audioContext.destination)
+        audioSource.start()
+        console.log("🎵 Audio playback started")
+      }
 
       // Create slideshow animation
       let currentImageIndex = 0
@@ -139,16 +194,25 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
           // Add image counter
           ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
-          ctx.fillRect(10, 10, 100, 30)
+          ctx.fillRect(10, 10, 120, 30)
           ctx.fillStyle = "#ffffff"
           ctx.font = "16px Arial"
           ctx.fillText(`${currentImageIndex + 1}/${loadedImages.length}`, 20, 30)
+
+          // Add audio indicator if audio is playing
+          if (config.audioUrl) {
+            ctx.fillStyle = "rgba(255, 0, 0, 0.8)"
+            ctx.fillRect(canvas.width - 40, 10, 30, 30)
+            ctx.fillStyle = "#ffffff"
+            ctx.font = "12px Arial"
+            ctx.fillText("🎵", canvas.width - 35, 30)
+          }
         }
 
         // Update progress
         const recordingProgress = 50 + (elapsed / totalDurationMs) * 45
         setProgress(recordingProgress)
-        setCurrentStep(`Recording image ${currentImageIndex + 1}/${loadedImages.length}...`)
+        setCurrentStep(`Recording image ${currentImageIndex + 1}/${loadedImages.length} with audio...`)
 
         requestAnimationFrame(animate)
       }

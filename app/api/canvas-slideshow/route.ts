@@ -40,8 +40,14 @@ async function generateVoiceover(script: string): Promise<string> {
       })
 
       if (result.audio_url) {
-        console.log("✅ Tortoise TTS voiceover generated")
-        return result.audio_url
+        console.log("✅ Tortoise TTS voiceover generated:", result.audio_url)
+        // Ensure the audio URL is accessible
+        const testResponse = await fetch(result.audio_url, { method: "HEAD" })
+        if (testResponse.ok) {
+          return result.audio_url
+        } else {
+          console.warn("Audio URL not accessible, trying fallback")
+        }
       }
     } catch (error) {
       console.error("Tortoise TTS failed:", error)
@@ -58,8 +64,12 @@ async function generateVoiceover(script: string): Promise<string> {
       })
 
       if (result.audio_url) {
-        console.log("✅ XTTS voiceover generated")
-        return result.audio_url
+        console.log("✅ XTTS voiceover generated:", result.audio_url)
+        // Ensure the audio URL is accessible
+        const testResponse = await fetch(result.audio_url, { method: "HEAD" })
+        if (testResponse.ok) {
+          return result.audio_url
+        }
       }
     } catch (error) {
       console.error("XTTS failed:", error)
