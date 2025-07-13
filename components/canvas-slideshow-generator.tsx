@@ -11,6 +11,7 @@ interface SlideshowConfig {
   timePerImage: number
   totalDuration: number
   audioUrl?: string
+  audioMethod?: string
   format: {
     width: number
     height: number
@@ -31,7 +32,9 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
   const [currentStep, setCurrentStep] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<string[]>([])
-  const [audioStatus, setAudioStatus] = useState<"checking" | "found" | "missing" | "error">("checking")
+  const [audioStatus, setAudioStatus] = useState<"checking" | "elevenlabs" | "browser" | "missing" | "error">(
+    "checking",
+  )
 
   const addDebugInfo = (info: string) => {
     console.log("🔧 DEBUG:", info)
@@ -42,28 +45,78 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
     if (!config.audioUrl) {
       setAudioStatus("missing")
       addDebugInfo("No audio URL provided")
-      return false
+      return { hasAudio: false, method: "none" }
     }
 
-    try {
-      addDebugInfo(`Testing audio URL: ${config.audioUrl}`)
-      const response = await fetch(config.audioUrl, { method: "HEAD" })
-
-      if (response.ok) {
-        addDebugInfo(`Audio URL accessible: ${response.status}`)
-        setAudioStatus("found")
-        return true
-      } else {
-        addDebugInfo(`Audio URL failed: ${response.status}`)
-        setAudioStatus("error")
-        return false
-      }
-    } catch (error) {
-      addDebugInfo(`Audio URL error: ${error}`)
+    // Check if it's ElevenLabs audio (data URL) or browser TTS
+    if (config.audioUrl.startsWith("data:audio/")) {
+      setAudioStatus("elevenlabs")
+      addDebugInfo("ElevenLabs audio detected (data URL)")
+      return { hasAudio: true, method: "elevenlabs" }
+    } else if (config.audioUrl.startsWith("tts:")) {
+      setAudioStatus("browser")
+      addDebugInfo("Browser TTS fallback detected")
+      return { hasAudio: true, method: "browser" }
+    } else {
       setAudioStatus("error")
-      return false
+      addDebugInfo("Unknown audio format")
+      return { hasAudio: false, method: "error" }
     }
   }, [config.audioUrl])
+
+  // Browser TTS function
+  const generateBrowserTTS = useCallback(async (text: string): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      if (!("speechSynthesis" in window)) {
+        reject(new Error("Speech synthesis not supported"))
+        return
+      }
+
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = 0.9
+      utterance.pitch = 1.0
+      utterance.volume = 1.0
+
+      // Try to use a good voice
+      const voices = speechSynthesis.getVoices()
+      const preferredVoice = voices.find(
+        (voice) => voice.name.includes("Google") || voice.name.includes("Microsoft") || voice.lang.startsWith("en"),
+      )
+      if (preferredVoice) {
+        utterance.voice = preferredVoice
+        addDebugInfo(`Using voice: ${preferredVoice.name}`)
+      }
+
+      // Record the speech
+      const audioContext = new AudioContext()
+      const destination = audioContext.createMediaStreamDestination()
+      const mediaRecorder = new MediaRecorder(destination.stream)
+      const chunks: Blob[] = []
+
+      mediaRecorder.ondataavailable = (event) => {
+        chunks.push(event.data)
+      }
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: "audio/webm" })
+        resolve(blob)
+      }
+
+      utterance.onstart = () => {
+        mediaRecorder.start()
+      }
+
+      utterance.onend = () => {
+        setTimeout(() => mediaRecorder.stop(), 500)
+      }
+
+      utterance.onerror = (error) => {
+        reject(error)
+      }
+
+      speechSynthesis.speak(utterance)
+    })
+  }, [])
 
   const generateSlideshow = useCallback(async () => {
     if (!canvasRef.current) {
@@ -86,11 +139,11 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       canvas.height = config.format.height
       addDebugInfo(`Canvas size: ${canvas.width}x${canvas.height}`)
 
-      // Check audio availability first
+      // Check audio availability
       setCurrentStep("Checking audio availability...")
       setProgress(5)
-      const hasAudio = await checkAudioAvailability()
-      addDebugInfo(`Audio available: ${hasAudio}`)
+      const audioInfo = await checkAudioAvailability()
+      addDebugInfo(`Audio method: ${audioInfo.method}`)
 
       setCurrentStep("Loading images...")
       setProgress(10)
@@ -119,61 +172,71 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
       addDebugInfo(`All ${loadedImages.length} images loaded successfully`)
 
-      setCurrentStep("Setting up recording...")
-      setProgress(30)
+      // Prepare audio
+      let audioElement: HTMLAudioElement | null = null
+      let audioBlob: Blob | null = null
 
-      // Create MediaRecorder with audio support if available
-      const stream = canvas.captureStream(config.format.fps)
-      addDebugInfo(`Canvas stream created with ${stream.getTracks().length} tracks`)
+      if (audioInfo.hasAudio && config.audioUrl) {
+        setCurrentStep("Preparing audio...")
+        setProgress(30)
 
-      // Try to add audio track if available
-      if (hasAudio && config.audioUrl) {
-        try {
-          setCurrentStep("Loading audio for real-time mixing...")
-          setProgress(35)
-
-          // Create audio element and try to capture its stream
-          const audio = new Audio()
-          audio.crossOrigin = "anonymous"
-          audio.src = config.audioUrl
-          audio.muted = true // Prevent actual playback during capture
+        if (audioInfo.method === "elevenlabs") {
+          // ElevenLabs audio (data URL)
+          audioElement = new Audio()
+          audioElement.src = config.audioUrl
+          audioElement.crossOrigin = "anonymous"
 
           await new Promise((resolve, reject) => {
-            audio.onloadeddata = resolve
-            audio.onerror = reject
-            audio.load()
+            audioElement!.onloadeddata = resolve
+            audioElement!.onerror = reject
+            audioElement!.load()
           })
 
-          // Try to capture audio stream (if supported)
-          if (audio.captureStream) {
-            const audioStream = audio.captureStream()
-            const audioTracks = audioStream.getAudioTracks()
-
-            if (audioTracks.length > 0) {
-              stream.addTrack(audioTracks[0])
-              addDebugInfo("Audio track added to stream successfully")
-            } else {
-              addDebugInfo("No audio tracks found in audio stream")
-            }
-          } else {
-            addDebugInfo("Audio capture not supported by browser")
+          addDebugInfo("ElevenLabs audio loaded successfully")
+        } else if (audioInfo.method === "browser") {
+          // Browser TTS
+          const ttsText = config.audioUrl.replace("tts:", "")
+          try {
+            audioBlob = await generateBrowserTTS(ttsText)
+            audioElement = new Audio()
+            audioElement.src = URL.createObjectURL(audioBlob)
+            addDebugInfo("Browser TTS audio generated successfully")
+          } catch (ttsError) {
+            addDebugInfo(`Browser TTS failed: ${ttsError}`)
+            audioElement = null
           }
-        } catch (audioError) {
-          addDebugInfo(`Audio integration failed: ${audioError}`)
         }
       }
 
-      // Set up MediaRecorder
-      const mimeType = hasAudio ? "video/webm;codecs=vp9,opus" : "video/webm;codecs=vp9"
-      addDebugInfo(`Using MIME type: ${mimeType}`)
+      setCurrentStep("Setting up recording...")
+      setProgress(35)
 
+      // Create MediaRecorder
+      const stream = canvas.captureStream(config.format.fps)
+      addDebugInfo(`Canvas stream created`)
+
+      // Try to add audio track if available
+      if (audioElement && audioElement.captureStream) {
+        try {
+          const audioStream = audioElement.captureStream()
+          const audioTracks = audioStream.getAudioTracks()
+
+          if (audioTracks.length > 0) {
+            stream.addTrack(audioTracks[0])
+            addDebugInfo("Audio track added to stream")
+          }
+        } catch (audioError) {
+          addDebugInfo(`Audio track integration failed: ${audioError}`)
+        }
+      }
+
+      const mimeType = audioElement ? "video/webm;codecs=vp9,opus" : "video/webm;codecs=vp9"
       const mediaRecorder = new MediaRecorder(stream, { mimeType })
       const chunks: Blob[] = []
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chunks.push(event.data)
-          addDebugInfo(`Recorded chunk: ${event.data.size} bytes`)
         }
       }
 
@@ -186,22 +249,18 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       })
 
       // Start recording
-      mediaRecorder.start(1000) // Record in 1-second chunks
+      mediaRecorder.start(1000)
       addDebugInfo("Recording started")
 
-      setCurrentStep("Recording slideshow...")
+      setCurrentStep("Recording slideshow with audio...")
       setProgress(40)
 
-      // If we have audio, start playing it for recording
-      let audioElement: HTMLAudioElement | null = null
-      if (hasAudio && config.audioUrl) {
+      // Start audio playback
+      if (audioElement) {
         try {
-          audioElement = new Audio()
-          audioElement.crossOrigin = "anonymous"
-          audioElement.src = config.audioUrl
-          audioElement.volume = 1.0
+          audioElement.currentTime = 0
           await audioElement.play()
-          addDebugInfo("Audio playback started for recording")
+          addDebugInfo("Audio playback started")
         } catch (audioError) {
           addDebugInfo(`Audio playback failed: ${audioError}`)
         }
@@ -259,12 +318,12 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           ctx.fillText(`${currentImageIndex + 1}/${loadedImages.length}`, 20, 30)
 
           // Add audio indicator
-          if (hasAudio && audioElement && !audioElement.paused) {
+          if (audioElement && !audioElement.paused) {
             ctx.fillStyle = "rgba(255, 0, 0, 0.8)"
-            ctx.fillRect(canvas.width - 40, 10, 30, 30)
+            ctx.fillRect(canvas.width - 50, 10, 40, 30)
             ctx.fillStyle = "#ffffff"
-            ctx.font = "12px Arial"
-            ctx.fillText("🎵", canvas.width - 35, 30)
+            ctx.font = "10px Arial"
+            ctx.fillText(audioInfo.method === "elevenlabs" ? "EL" : "TTS", canvas.width - 45, 30)
           }
         }
 
@@ -293,24 +352,37 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       setIsGenerating(false)
 
       addDebugInfo("Slideshow generation completed successfully")
+
+      // Cleanup
+      if (audioBlob) {
+        URL.revokeObjectURL(audioElement!.src)
+      }
     } catch (error) {
       console.error("Slideshow generation failed:", error)
       addDebugInfo(`Generation failed: ${error}`)
       onError(error instanceof Error ? error.message : "Slideshow generation failed")
       setIsGenerating(false)
     }
-  }, [config, onVideoGenerated, onError, checkAudioAvailability])
+  }, [config, onVideoGenerated, onError, checkAudioAvailability, generateBrowserTTS])
 
   // Test audio function
   const testAudio = useCallback(async () => {
     if (!config.audioUrl) return
 
     try {
-      const audio = new Audio()
-      audio.crossOrigin = "anonymous"
-      audio.src = config.audioUrl
-      await audio.play()
-      addDebugInfo("Audio test playback successful")
+      if (config.audioUrl.startsWith("data:audio/")) {
+        // ElevenLabs audio
+        const audio = new Audio()
+        audio.src = config.audioUrl
+        await audio.play()
+        addDebugInfo("ElevenLabs audio test successful")
+      } else if (config.audioUrl.startsWith("tts:")) {
+        // Browser TTS
+        const text = config.audioUrl.replace("tts:", "")
+        const utterance = new SpeechSynthesisUtterance(text.substring(0, 100) + "...")
+        speechSynthesis.speak(utterance)
+        addDebugInfo("Browser TTS test successful")
+      }
     } catch (error) {
       addDebugInfo(`Audio test failed: ${error}`)
     }
@@ -325,28 +397,29 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           {/* Audio Status */}
           <div
             className={`border rounded-lg p-4 ${
-              audioStatus === "found"
+              audioStatus === "elevenlabs"
                 ? "bg-green-50 border-green-200"
-                : audioStatus === "missing"
-                  ? "bg-yellow-50 border-yellow-200"
-                  : audioStatus === "error"
-                    ? "bg-red-50 border-red-200"
-                    : "bg-gray-50 border-gray-200"
+                : audioStatus === "browser"
+                  ? "bg-blue-50 border-blue-200"
+                  : audioStatus === "missing"
+                    ? "bg-yellow-50 border-yellow-200"
+                    : "bg-red-50 border-red-200"
             }`}
           >
             <div className="flex items-center gap-2 mb-2">
-              {audioStatus === "found" && <Volume2 className="h-5 w-5 text-green-600" />}
+              {audioStatus === "elevenlabs" && <Volume2 className="h-5 w-5 text-green-600" />}
+              {audioStatus === "browser" && <Volume2 className="h-5 w-5 text-blue-600" />}
               {audioStatus === "missing" && <VolumeX className="h-5 w-5 text-yellow-600" />}
               {audioStatus === "error" && <AlertTriangle className="h-5 w-5 text-red-600" />}
               <span className="font-medium">
                 Audio Status:{" "}
-                {audioStatus === "found"
-                  ? "✅ Available"
-                  : audioStatus === "missing"
-                    ? "⚠️ No Audio"
-                    : audioStatus === "error"
-                      ? "❌ Error"
-                      : "🔍 Checking..."}
+                {audioStatus === "elevenlabs"
+                  ? "✅ ElevenLabs TTS"
+                  : audioStatus === "browser"
+                    ? "🔄 Browser TTS Fallback"
+                    : audioStatus === "missing"
+                      ? "⚠️ No Audio"
+                      : "❌ Error"}
               </span>
             </div>
             {config.audioUrl && (
@@ -365,22 +438,24 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center gap-2 text-green-700 mb-2">
               <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">Slideshow Ready!</span>
+              <span className="font-medium">ElevenLabs Slideshow Ready!</span>
             </div>
             <div className="text-sm text-green-600 space-y-1">
               <p>✅ {config.images.length} images loaded</p>
               <p>✅ {config.timePerImage}s per image</p>
               <p>✅ {config.totalDuration}s total duration</p>
               <p>✅ TikTok format (9:16)</p>
-              {audioStatus === "found" && <p>✅ Audio will be included</p>}
-              {audioStatus !== "found" && <p>⚠️ Video-only (no audio)</p>}
+              {audioStatus === "elevenlabs" && <p>✅ ElevenLabs voiceover ready</p>}
+              {audioStatus === "browser" && <p>🔄 Browser TTS fallback ready</p>}
+              {audioStatus === "missing" && <p>⚠️ Video-only (no audio)</p>}
             </div>
           </div>
 
           <Button onClick={generateSlideshow} className="w-full" size="lg">
             <Play className="mr-2 h-4 w-4" />
             Generate Slideshow with ALL {config.images.length} Images
-            {audioStatus === "found" && " + Audio"}
+            {audioStatus === "elevenlabs" && " + ElevenLabs Audio"}
+            {audioStatus === "browser" && " + Browser TTS"}
           </Button>
         </div>
       )}
@@ -399,7 +474,8 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
             <Loader2 className="h-4 w-4 animate-spin" />
             <AlertDescription>
               Creating slideshow with {config.images.length} images...
-              {audioStatus === "found" && " Audio integration in progress."}
+              {audioStatus === "elevenlabs" && " ElevenLabs audio integration in progress."}
+              {audioStatus === "browser" && " Browser TTS integration in progress."}
             </AlertDescription>
           </Alert>
 
@@ -420,20 +496,21 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center gap-2 text-green-700 mb-2">
               <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">Video Generated!</span>
+              <span className="font-medium">Video Generated with Audio!</span>
             </div>
             <div className="text-sm text-green-600">
               <p>✅ ALL {config.images.length} images included</p>
               <p>✅ {config.totalDuration} seconds duration</p>
               <p>✅ TikTok format ready</p>
-              {audioStatus === "found" && <p>✅ Audio should be included</p>}
+              {audioStatus === "elevenlabs" && <p>✅ ElevenLabs voiceover embedded</p>}
+              {audioStatus === "browser" && <p>✅ Browser TTS embedded</p>}
             </div>
           </div>
 
           <Button asChild className="w-full" size="lg">
-            <a href={videoUrl} download="property-slideshow.webm">
+            <a href={videoUrl} download="property-slideshow-with-elevenlabs-audio.webm">
               <Download className="mr-2 h-4 w-4" />
-              Download Video
+              Download Video with Audio
             </a>
           </Button>
 

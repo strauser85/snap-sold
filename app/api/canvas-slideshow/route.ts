@@ -1,10 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import * as fal from "@fal-ai/serverless-client"
-
-// Configure Fal AI
-fal.config({
-  credentials: process.env.FAL_KEY,
-})
 
 interface SlideshowRequest {
   imageUrls: string[]
@@ -19,92 +13,116 @@ interface SlideshowRequest {
   }
 }
 
-// Generate voiceover using AI
-async function generateVoiceover(script: string): Promise<string> {
+// Generate voiceover using ElevenLabs
+async function generateElevenLabsVoiceover(script: string): Promise<string> {
   try {
-    console.log("🎤 Generating AI voiceover...")
+    console.log("🎤 Generating ElevenLabs voiceover...")
+
+    if (!process.env.ELEVENLABS_API_KEY) {
+      throw new Error("ElevenLabs API key not configured")
+    }
 
     const cleanScript = script
       .replace(/[^\w\s.,!?'-]/g, " ")
       .replace(/\s+/g, " ")
       .trim()
 
-    // Try Tortoise TTS first
-    try {
-      const result = await fal.subscribe("fal-ai/tortoise-tts", {
-        input: {
-          text: cleanScript,
-          voice: "angie",
-          preset: "standard",
-        },
-      })
+    console.log(`Script length: ${cleanScript.length} characters`)
 
-      if (result.audio_url) {
-        console.log("✅ Tortoise TTS voiceover generated:", result.audio_url)
-        // Ensure the audio URL is accessible
-        const testResponse = await fetch(result.audio_url, { method: "HEAD" })
-        if (testResponse.ok) {
-          return result.audio_url
-        } else {
-          console.warn("Audio URL not accessible, trying fallback")
-        }
-      }
-    } catch (error) {
-      console.error("Tortoise TTS failed:", error)
+    // Use ElevenLabs Text-to-Speech API
+    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+      method: "POST",
+      headers: {
+        Accept: "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": process.env.ELEVENLABS_API_KEY,
+      },
+      body: JSON.stringify({
+        text: cleanScript,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.5,
+          style: 0.0,
+          use_speaker_boost: true,
+        },
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error("ElevenLabs API error:", response.status, errorText)
+      throw new Error(`ElevenLabs API error: ${response.status}`)
     }
 
-    // Try XTTS fallback
-    try {
-      const result = await fal.subscribe("fal-ai/xtts", {
-        input: {
-          text: cleanScript,
-          speaker: "female_1",
-          language: "en",
-        },
-      })
+    // Get the audio blob
+    const audioBlob = await response.blob()
+    console.log(`ElevenLabs audio generated: ${audioBlob.size} bytes`)
 
-      if (result.audio_url) {
-        console.log("✅ XTTS voiceover generated:", result.audio_url)
-        // Ensure the audio URL is accessible
-        const testResponse = await fetch(result.audio_url, { method: "HEAD" })
-        if (testResponse.ok) {
-          return result.audio_url
-        }
-      }
-    } catch (error) {
-      console.error("XTTS failed:", error)
-    }
+    // Convert blob to data URL for immediate use
+    const arrayBuffer = await audioBlob.arrayBuffer()
+    const base64Audio = Buffer.from(arrayBuffer).toString("base64")
+    const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
-    throw new Error("All TTS services failed")
+    console.log("✅ ElevenLabs voiceover generated successfully")
+    return audioDataUrl
   } catch (error) {
-    console.error("Voiceover generation failed:", error)
+    console.error("ElevenLabs voiceover generation failed:", error)
     throw error
   }
+}
+
+// Fallback TTS using browser Speech Synthesis (server-side preparation)
+function generateFallbackScript(script: string): string {
+  console.log("⚠️ Using fallback TTS preparation")
+
+  // Clean and optimize script for speech synthesis
+  const cleanScript = script
+    .replace(/[^\w\s.,!?'-]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\$(\d+)/g, "$1 dollars") // Convert prices to speakable format
+    .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
+    .replace(/(\d+)\s*bed/gi, "$1 bedroom")
+    .replace(/(\d+)\s*bath/gi, "$1 bathroom")
+    .trim()
+
+  return cleanScript
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { imageUrls, script, propertyData }: SlideshowRequest = await request.json()
 
-    console.log(`🎬 CANVAS SLIDESHOW GENERATION`)
+    console.log(`🎬 CANVAS SLIDESHOW WITH ELEVENLABS`)
     console.log(`📍 Property: ${propertyData.address}`)
     console.log(`🖼️ Images: ${imageUrls.length} (ALL WILL BE USED)`)
     console.log(`📝 Script: ${script.length} characters`)
 
-    // Step 1: Generate AI voiceover
+    // Step 1: Generate ElevenLabs voiceover
     let audioUrl = ""
     let audioError = null
+    let audioMethod = "none"
+
     try {
-      audioUrl = await generateVoiceover(script)
-      console.log("✅ AI voiceover generated successfully")
+      audioUrl = await generateElevenLabsVoiceover(script)
+      audioMethod = "elevenlabs"
+      console.log("✅ ElevenLabs voiceover generated successfully")
     } catch (error) {
-      console.log("⚠️ AI voiceover failed, slideshow will be created without audio")
-      audioError = error instanceof Error ? error.message : "Voiceover generation failed"
+      console.log("⚠️ ElevenLabs failed, preparing fallback TTS")
+      audioError = error instanceof Error ? error.message : "ElevenLabs generation failed"
+
+      // Prepare script for browser-based TTS fallback
+      const optimizedScript = generateFallbackScript(script)
+      audioMethod = "browser-fallback"
+
+      // Return script for browser TTS instead of audio URL
+      audioUrl = `tts:${optimizedScript}`
     }
 
     // Step 2: Calculate slideshow timing
     const wordCount = script.split(" ").length
-    const estimatedSpeechDuration = audioUrl ? Math.max(30, wordCount * 0.5) : 45
+    const estimatedSpeechDuration =
+      audioMethod === "elevenlabs" ? Math.max(30, wordCount * 0.5) : Math.max(45, wordCount * 0.6)
     const timePerImage = Math.max(3, Math.floor(estimatedSpeechDuration / imageUrls.length))
     const totalDuration = imageUrls.length * timePerImage
 
@@ -113,12 +131,14 @@ export async function POST(request: NextRequest) {
     console.log(`   - ${timePerImage} seconds per image`)
     console.log(`   - ${totalDuration} seconds total`)
     console.log(`   - ${wordCount} words in script`)
+    console.log(`   - Audio method: ${audioMethod}`)
 
-    // Step 3: Return slideshow configuration for Canvas generation
+    // Step 3: Return slideshow configuration
     return NextResponse.json({
       success: true,
       audioUrl: audioUrl || null,
       audioError: audioError,
+      audioMethod: audioMethod,
       slideshow: {
         images: imageUrls,
         timePerImage: timePerImage,
@@ -132,17 +152,19 @@ export async function POST(request: NextRequest) {
       },
       metadata: {
         generatedAt: new Date().toISOString(),
-        method: "canvas-slideshow",
+        method: "canvas-slideshow-elevenlabs",
         imageCount: imageUrls.length,
         hasAudio: !!audioUrl,
+        audioMethod: audioMethod,
         allImagesUsed: true,
         reliable: true,
-        cost: "free",
+        cost: audioMethod === "elevenlabs" ? "elevenlabs-api" : "free",
       },
       instructions: {
-        message: "Canvas slideshow configuration ready",
+        message: "Canvas slideshow with ElevenLabs audio ready",
         nextStep: "Client-side Canvas generation will create the video",
         guarantee: `ALL ${imageUrls.length} images will be used`,
+        audioStatus: audioMethod === "elevenlabs" ? "ElevenLabs TTS generated" : "Browser TTS fallback prepared",
       },
     })
   } catch (error) {
