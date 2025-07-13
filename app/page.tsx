@@ -22,6 +22,8 @@ import {
   FileText,
   Volume2,
   Upload,
+  ArrowUpDown,
+  Sparkles,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
 import { CanvasSlideshowGenerator } from "@/components/canvas-slideshow-generator"
@@ -46,6 +48,20 @@ interface UploadedImage {
   id: string
   isUploading?: boolean
   uploadError?: string
+  roomType?: string
+  features?: string[]
+  description?: string
+  confidence?: number
+  suggestedOrder?: number
+}
+
+interface ImageAnalysis {
+  url: string
+  roomType: string
+  features: string[]
+  description: string
+  confidence: number
+  suggestedOrder: number
 }
 
 export default function VideoGenerator() {
@@ -62,6 +78,7 @@ export default function VideoGenerator() {
 
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
+  const [isAnalyzingImages, setIsAnalyzingImages] = useState(false)
   const [progress, setProgress] = useState<GenerationProgress | null>(null)
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -70,6 +87,7 @@ export default function VideoGenerator() {
 
   const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
   const [showCanvasGenerator, setShowCanvasGenerator] = useState(false)
+  const [imagesArranged, setImagesArranged] = useState(false)
 
   // Compress image to reduce file size
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
@@ -179,6 +197,9 @@ export default function VideoGenerator() {
           )
         }
       }
+
+      // Reset arrangement status when new images are added
+      setImagesArranged(false)
     }
   }
 
@@ -190,6 +211,7 @@ export default function VideoGenerator() {
       }
       return prev.filter((img) => img.id !== id)
     })
+    setImagesArranged(false)
   }
 
   const moveImage = (id: string, direction: "up" | "down") => {
@@ -205,6 +227,7 @@ export default function VideoGenerator() {
       newArray.splice(newIndex, 0, movedItem)
       return newArray
     })
+    setImagesArranged(false)
   }
 
   const generateAIScript = async () => {
@@ -249,6 +272,7 @@ export default function VideoGenerator() {
 
       setGeneratedScript(data.script)
       setScriptMethod(data.method)
+      setImagesArranged(false) // Reset arrangement when script changes
     } catch (err) {
       console.error("Script generation failed:", err)
       setError(err instanceof Error ? err.message : "Failed to generate script.")
@@ -267,6 +291,88 @@ export default function VideoGenerator() {
       setScriptMethod("emergency")
     } finally {
       setIsGeneratingScript(false)
+    }
+  }
+
+  const arrangeImagesIntelligently = async () => {
+    if (!generatedScript || uploadedImages.length === 0) {
+      setError("Please generate a script and upload images first.")
+      return
+    }
+
+    const successfulImages = uploadedImages.filter((img) => img.blobUrl)
+    if (successfulImages.length === 0) {
+      setError("No images are ready for analysis.")
+      return
+    }
+
+    setIsAnalyzingImages(true)
+    setError(null)
+
+    try {
+      console.log("🔍 Analyzing images for smart arrangement...")
+
+      const imageUrls = successfulImages.map((img) => img.blobUrl!)
+
+      const response = await fetch("/api/analyze-images", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageUrls,
+          script: generatedScript,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Image analysis failed")
+      }
+
+      const analysisData = await response.json()
+
+      if (analysisData.success) {
+        console.log("✅ Image analysis complete")
+
+        // Update images with analysis data and reorder
+        const arrangedImages: UploadedImage[] = []
+
+        analysisData.arrangedImages.forEach((analysis: ImageAnalysis) => {
+          const originalImage = successfulImages.find((img) => img.blobUrl === analysis.url)
+          if (originalImage) {
+            arrangedImages.push({
+              ...originalImage,
+              roomType: analysis.roomType,
+              features: analysis.features,
+              description: analysis.description,
+              confidence: analysis.confidence,
+              suggestedOrder: analysis.suggestedOrder,
+            })
+          }
+        })
+
+        // Add any images that weren't analyzed (failed uploads, etc.)
+        uploadedImages.forEach((img) => {
+          if (!img.blobUrl || !arrangedImages.find((arranged) => arranged.id === img.id)) {
+            arrangedImages.push(img)
+          }
+        })
+
+        setUploadedImages(arrangedImages)
+        setImagesArranged(true)
+
+        console.log(
+          `📊 Images arranged: ${analysisData.summary.totalImages} total, ${analysisData.summary.averageConfidence.toFixed(2)} avg confidence`,
+        )
+      } else {
+        throw new Error("Image analysis failed")
+      }
+    } catch (err) {
+      console.error("Image arrangement failed:", err)
+      setError(err instanceof Error ? err.message : "Failed to arrange images.")
+    } finally {
+      setIsAnalyzingImages(false)
     }
   }
 
@@ -302,16 +408,18 @@ export default function VideoGenerator() {
     setProgress(null)
 
     try {
-      setProgress({ step: `Preparing Canvas slideshow with ${successfulImages.length} images...`, progress: 25 })
+      setProgress({ step: `Preparing slideshow with ${successfulImages.length} images...`, progress: 25 })
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      setProgress({ step: "Generating AI voiceover...", progress: 50 })
+      setProgress({ step: "Generating ElevenLabs AI voiceover...", progress: 50 })
       await new Promise((resolve) => setTimeout(resolve, 2000))
 
-      setProgress({ step: "Setting up Canvas slideshow generator...", progress: 75 })
+      setProgress({ step: "Setting up intelligent slideshow generator...", progress: 75 })
 
-      // Use blob URLs for Canvas slideshow
-      const imageUrls = successfulImages.map((img) => img.blobUrl!)
+      // Use arranged image order (or original order if not arranged)
+      const imageUrls = successfulImages
+        .sort((a, b) => (a.suggestedOrder || 0) - (b.suggestedOrder || 0))
+        .map((img) => img.blobUrl!)
 
       const response = await fetch("/api/generate-video", {
         method: "POST",
@@ -338,7 +446,7 @@ export default function VideoGenerator() {
       const data = await response.json()
 
       if (data.success && data.slideshowConfig) {
-        console.log("✅ Canvas slideshow configuration ready!")
+        console.log("✅ Intelligent slideshow configuration ready!")
 
         // Set up Canvas slideshow
         setSlideshowConfig({
@@ -346,17 +454,18 @@ export default function VideoGenerator() {
           timePerImage: data.slideshowConfig.timePerImage,
           totalDuration: data.slideshowConfig.totalDuration,
           audioUrl: data.audioUrl,
+          audioMethod: data.audioMethod,
           format: data.slideshowConfig.format,
         })
 
         setShowCanvasGenerator(true)
-        setProgress({ step: "Canvas slideshow ready! Click generate below.", progress: 100 })
+        setProgress({ step: "Intelligent slideshow ready! Click generate below.", progress: 100 })
       } else {
-        throw new Error("Failed to prepare Canvas slideshow")
+        throw new Error("Failed to prepare intelligent slideshow")
       }
     } catch (err) {
       console.error("Generation error:", err)
-      setError(err instanceof Error ? err.message : "Canvas slideshow preparation failed")
+      setError(err instanceof Error ? err.message : "Slideshow preparation failed")
     } finally {
       setIsLoading(false)
     }
@@ -378,6 +487,7 @@ export default function VideoGenerator() {
     setProgress(null)
     setSlideshowConfig(null)
     setShowCanvasGenerator(false)
+    setImagesArranged(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -391,7 +501,7 @@ export default function VideoGenerator() {
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">SnapSold</h1>
           <p className="text-lg text-gray-600 leading-relaxed">
-            Create viral TikTok videos with AI-powered scripts and up to 20 property images
+            Create viral TikTok videos with AI-powered scripts, intelligent image arrangement, and ElevenLabs voiceover
           </p>
         </div>
 
@@ -552,6 +662,45 @@ Examples:
                 </Alert>
               )}
 
+              {/* Smart Arrangement Button */}
+              {uploadedCount > 0 && generatedScript && !imagesArranged && (
+                <Alert>
+                  <Sparkles className="h-4 w-4" />
+                  <AlertDescription className="flex items-center justify-between">
+                    <span>Arrange images intelligently to match your voiceover content</span>
+                    <Button
+                      onClick={arrangeImagesIntelligently}
+                      disabled={isAnalyzingImages}
+                      variant="outline"
+                      size="sm"
+                      className="ml-2 bg-transparent"
+                    >
+                      {isAnalyzingImages ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          Analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUpDown className="mr-1 h-3 w-3" />
+                          Smart Arrange
+                        </>
+                      )}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {imagesArranged && (
+                <Alert>
+                  <CheckCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    ✅ Images intelligently arranged to match voiceover content! Room types detected and ordered for
+                    optimal flow.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* Image Display */}
               {uploadedImages.length > 0 && (
                 <div className="border rounded-lg p-4 bg-gray-50 max-h-80 overflow-y-auto">
@@ -567,6 +716,11 @@ Examples:
                           <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
                             {index + 1}
                           </div>
+                          {img.roomType && (
+                            <div className="absolute bottom-1 left-1 bg-blue-500 bg-opacity-75 text-white text-xs px-1 rounded">
+                              {img.roomType.replace("_", " ")}
+                            </div>
+                          )}
                           {img.isUploading && (
                             <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-md">
                               <Loader2 className="h-4 w-4 text-white animate-spin" />
@@ -606,16 +760,23 @@ Examples:
                           <div className="flex-1">
                             <p className="text-sm font-medium">Image {index + 1}</p>
                             <p className="text-xs text-gray-500">{img.file.name}</p>
+                            {img.roomType && (
+                              <p className="text-xs text-blue-600">
+                                {img.roomType.replace("_", " ")}
+                                {img.confidence && ` (${Math.round(img.confidence * 100)}% confidence)`}
+                              </p>
+                            )}
+                            {img.description && <p className="text-xs text-gray-400">{img.description}</p>}
                             {img.isUploading && <p className="text-xs text-blue-500">Uploading...</p>}
                             {img.uploadError && <p className="text-xs text-red-500">Upload failed</p>}
-                            {img.blobUrl && <p className="text-xs text-green-500">Ready</p>}
+                            {img.blobUrl && !img.roomType && <p className="text-xs text-green-500">Ready</p>}
                           </div>
                           <div className="flex gap-1">
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => moveImage(img.id, "up")}
-                              disabled={index === 0 || isLoading}
+                              disabled={index === 0 || isLoading || imagesArranged}
                               className="h-6 w-6 p-0"
                             >
                               ↑
@@ -624,7 +785,7 @@ Examples:
                               variant="outline"
                               size="sm"
                               onClick={() => moveImage(img.id, "down")}
-                              disabled={index === uploadedImages.length - 1 || isLoading}
+                              disabled={index === uploadedImages.length - 1 || isLoading || imagesArranged}
                               className="h-6 w-6 p-0"
                             >
                               ↓
@@ -694,7 +855,10 @@ Examples:
               <Textarea
                 id="generated-script"
                 value={generatedScript}
-                onChange={(e) => setGeneratedScript(e.target.value)}
+                onChange={(e) => {
+                  setGeneratedScript(e.target.value)
+                  setImagesArranged(false) // Reset arrangement when script changes
+                }}
                 placeholder="Click 'Generate Script' to create an AI-powered TikTok script that incorporates your property description, or write your own..."
                 className="min-h-[120px] text-base"
                 disabled={isLoading}
@@ -738,10 +902,10 @@ Examples:
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating Slideshow Video...
+                  Creating Intelligent Slideshow...
                 </>
               ) : (
-                `Generate Slideshow Video (${uploadedCount} images ready)`
+                `Generate ${imagesArranged ? "Intelligent" : ""} Slideshow Video (${uploadedCount} images ready)`
               )}
             </Button>
           </CardContent>
@@ -788,7 +952,7 @@ Examples:
                       <p className="text-sm font-medium">{result.listing?.address}</p>
                       <p className="text-xs opacity-80 flex items-center gap-1">
                         <Volume2 className="h-3 w-3" />
-                        Canvas Slideshow with {result.metadata?.imageCount} images!
+                        {imagesArranged ? "Intelligent" : "Canvas"} Slideshow with {result.metadata?.imageCount} images!
                       </p>
                     </div>
                   </div>
@@ -799,7 +963,7 @@ Examples:
                     </Button>
                     {result.videoUrl && (
                       <Button asChild className="flex-1">
-                        <a href={result.videoUrl} download="property-slideshow.webm">
+                        <a href={result.videoUrl} download="intelligent-property-slideshow.webm">
                           <Download className="mr-2 h-4 w-4" />
                           Download
                         </a>
@@ -825,7 +989,7 @@ Examples:
                       metadata: {
                         imageCount: slideshowConfig.images.length,
                         duration: `${slideshowConfig.totalDuration}s`,
-                        method: "canvas-slideshow",
+                        method: imagesArranged ? "intelligent-slideshow" : "canvas-slideshow",
                       },
                     })
                     setShowCanvasGenerator(false)
@@ -840,8 +1004,8 @@ Examples:
                   <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     <Play className="h-6 w-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500">Your Canvas slideshow will appear here</p>
-                  <p className="text-xs text-gray-400">Up to 20 images with AI voiceover</p>
+                  <p className="text-sm text-gray-500">Your intelligent slideshow will appear here</p>
+                  <p className="text-xs text-gray-400">AI-arranged images with ElevenLabs voiceover</p>
                 </div>
               )}
             </div>
