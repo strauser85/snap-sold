@@ -299,17 +299,17 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw captions with typewriter effect (500ms delayed)
+            // Draw captions with typewriter effect (500ms delayed, yellow text, black background)
             if (currentCaption) {
               // Font settings - yellow text with black background
-              const fontSize = Math.floor(canvas.width * 0.045)
+              const fontSize = Math.floor(canvas.width * 0.05) // Slightly larger for better readability
               ctx.font = `900 ${fontSize}px "Arial Black", "Arial", sans-serif`
               ctx.textAlign = "center"
 
-              // Calculate max width for text wrapping
+              // Calculate max width for text wrapping (90% of canvas width)
               const maxTextWidth = canvas.width * 0.9
 
-              // Typewriter effect calculation
+              // Typewriter effect calculation with 500ms delay built into timing
               const captionDuration = currentCaption.endTime - currentCaption.startTime
               const captionElapsed = elapsedSeconds - currentCaption.startTime
               const captionProgress = Math.max(0, Math.min(1, captionElapsed / captionDuration))
@@ -318,7 +318,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               let visibleText = ""
 
               if (videoData.metadata?.alignmentUsed && currentCaption.words && currentCaption.words.length > 0) {
-                // Word-by-word reveal for aligned captions
+                // Word-by-word reveal for aligned captions (already includes 500ms delay)
                 const visibleWords: string[] = []
                 currentCaption.words.forEach((wordTiming) => {
                   if (elapsedSeconds >= wordTiming.startTime) {
@@ -327,7 +327,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                 })
                 visibleText = visibleWords.join(" ")
               } else {
-                // Character-by-character typewriter for sentence captions
+                // Character-by-character typewriter for sentence captions (500ms delay built in)
                 const totalChars = currentCaption.text.length
                 const charsToShow = Math.floor(captionProgress * totalChars)
                 visibleText = currentCaption.text.substring(0, charsToShow)
@@ -337,9 +337,9 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                 // Wrap text to prevent overflow
                 const wrappedLines = wrapText(ctx, visibleText, maxTextWidth)
 
-                const lineHeight = fontSize * 1.3
-                const padding = fontSize * 0.4
-                const startY = canvas.height * 0.75 // Centered in lower third
+                const lineHeight = fontSize * 1.4 // More spacing between lines
+                const padding = fontSize * 0.5 // More padding around text
+                const startY = canvas.height * 0.72 // Centered in lower third
 
                 wrappedLines.forEach((line, lineIndex) => {
                   const y = startY + lineIndex * lineHeight
@@ -351,36 +351,37 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                     const boxWidth = textWidth + padding * 2
                     const boxHeight = fontSize + padding
                     const boxX = (canvas.width - boxWidth) / 2
-                    const boxY = y - fontSize * 0.8
+                    const boxY = y - fontSize * 0.85
 
-                    // Draw semi-transparent black background box
-                    ctx.fillStyle = "rgba(0, 0, 0, 0.8)" // 80% opacity
+                    // Draw semi-transparent black background box with rounded corners effect
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.85)" // Higher opacity for better contrast
                     ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
-                    // Draw yellow text (centered)
-                    ctx.fillStyle = "#FFFF00" // Pure yellow
+                    // Draw bright yellow text (perfectly centered)
+                    ctx.fillStyle = "#FFFF00" // Pure bright yellow
                     ctx.fillText(line, canvas.width / 2, y)
 
-                    // Add subtle text outline for clarity
-                    ctx.strokeStyle = "rgba(0, 0, 0, 0.5)"
-                    ctx.lineWidth = 1
+                    // Add subtle black outline for extra clarity
+                    ctx.strokeStyle = "rgba(0, 0, 0, 0.8)"
+                    ctx.lineWidth = 2
                     ctx.strokeText(line, canvas.width / 2, y)
                   }
                 })
 
-                // Show typewriter cursor
-                if (captionProgress < 0.95) {
+                // Show typewriter cursor (blinking effect)
+                if (captionProgress < 0.98) {
+                  // Show cursor until almost complete
                   const lastLine = wrappedLines[wrappedLines.length - 1]
                   if (lastLine) {
                     const y = startY + (wrappedLines.length - 1) * lineHeight
                     const textMetrics = ctx.measureText(lastLine)
-                    const cursorX = canvas.width / 2 + textMetrics.width / 2 + 3
+                    const cursorX = canvas.width / 2 + textMetrics.width / 2 + 4
 
-                    // Blinking cursor
+                    // Blinking cursor (3 blinks per second)
                     const shouldShowCursor = Math.floor(elapsedSeconds * 3) % 2 === 0
                     if (shouldShowCursor) {
                       ctx.fillStyle = "#FFFF00"
-                      ctx.fillRect(cursorX, y - fontSize * 0.7, 2, fontSize * 0.8)
+                      ctx.fillRect(cursorX, y - fontSize * 0.8, 3, fontSize * 0.9)
                     }
                   }
                 }
@@ -412,12 +413,13 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               70,
             )
 
-            // Voice and sync indicator
+            // Voice and sync indicator (shows whether alignment worked or not)
             ctx.fillStyle = "#FF69B4"
-            ctx.font = "bold 12px Arial"
+            ctx.font = "bold 11px Arial"
             ctx.textAlign = "right"
-            const syncType = videoData.metadata?.alignmentUsed ? "Word-Synced" : "Sentence-Synced"
-            ctx.fillText(`🎤 Rachel (0.85x) ${syncType}`, canvas.width - 15, 85)
+            const syncStatus = videoData.metadata?.alignmentUsed ? "Word-Synced" : "Sentence-Synced"
+            const voiceInfo = `🎤 Rachel 0.85x • ${syncStatus}`
+            ctx.fillText(voiceInfo, canvas.width - 15, 85)
 
             ctx.textAlign = "start"
           }

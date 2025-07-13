@@ -17,7 +17,113 @@ interface WordTiming {
   endTime: number
 }
 
-// Generate ElevenLabs Rachel voiceover with safe alignment handling
+// Comprehensive text cleaning for natural TTS speech
+function cleanTextForVoice(text: string): string {
+  let cleaned = text
+
+  // Step 1: Preserve important patterns we don't want to change
+  const preservePatterns: { [key: string]: string } = {}
+  let preserveCounter = 0
+
+  // Preserve prices (e.g., $250,000, $1.5M, $2.3 million)
+  cleaned = cleaned.replace(/\$[\d,]+(?:\.[\d]+)?[KMB]?(?:\s*(?:million|thousand|billion))?/gi, (match) => {
+    const placeholder = `__PRESERVE_PRICE_${preserveCounter++}__`
+    preservePatterns[placeholder] = match
+    return placeholder
+  })
+
+  // Preserve street numbers and addresses (e.g., 123 Main St, 4567 Oak Ave)
+  cleaned = cleaned.replace(
+    /\b\d+\s+[A-Za-z]+\s+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Blvd|Boulevard|Ln|Lane|Ct|Court|Pl|Place|Way|Circle|Cir)\b/gi,
+    (match) => {
+      const placeholder = `__PRESERVE_ADDRESS_${preserveCounter++}__`
+      preservePatterns[placeholder] = match
+      return placeholder
+    },
+  )
+
+  // Preserve square footage numbers (e.g., 2,500 sq ft, 1500 sqft)
+  cleaned = cleaned.replace(/\b[\d,]+\s*(?:sq\s*ft|sqft|square\s+feet)\b/gi, (match) => {
+    const placeholder = `__PRESERVE_SQFT_${preserveCounter++}__`
+    preservePatterns[placeholder] = match
+    return placeholder
+  })
+
+  // Step 2: Convert decimals to spoken form
+  // Handle decimals like 2.5 → "two and a half", 1.5 → "one and a half"
+  cleaned = cleaned.replace(/\b(\d+)\.5\b/g, (match, whole) => {
+    const wholeNum = Number.parseInt(whole)
+    const wholeWord = numberToWords(wholeNum)
+    return `${wholeWord} and a half`
+  })
+
+  // Handle other decimals like 3.2 → "three point two"
+  cleaned = cleaned.replace(/\b(\d+)\.(\d+)\b/g, (match, whole, decimal) => {
+    const wholeWord = numberToWords(Number.parseInt(whole))
+    const decimalDigits = decimal
+      .split("")
+      .map((d) => numberToWords(Number.parseInt(d)))
+      .join(" ")
+    return `${wholeWord} point ${decimalDigits}`
+  })
+
+  // Step 3: Convert numbers 1-10 to words (but not in preserved patterns)
+  cleaned = cleaned.replace(/\b([1-9]|10)\b/g, (match) => {
+    return numberToWords(Number.parseInt(match))
+  })
+
+  // Step 4: Replace real estate abbreviations
+  cleaned = cleaned.replace(/\bBR\b/gi, "bedrooms")
+  cleaned = cleaned.replace(/\bBA\b/gi, "bathrooms")
+  cleaned = cleaned.replace(/\bbeds?\b/gi, "bedrooms")
+  cleaned = cleaned.replace(/\bbaths?\b/gi, "bathrooms")
+
+  // Step 5: Fix punctuation spacing
+  // Add space after periods if missing
+  cleaned = cleaned.replace(/\.([A-Za-z])/g, ". $1")
+  // Add space after commas if missing
+  cleaned = cleaned.replace(/,([A-Za-z])/g, ", $1")
+  // Add space after exclamation marks if missing
+  cleaned = cleaned.replace(/!([A-Za-z])/g, "! $1")
+  // Add space after question marks if missing
+  cleaned = cleaned.replace(/\?([A-Za-z])/g, "? $1")
+
+  // Step 6: Remove or replace problematic characters for TTS
+  // Remove emojis and special symbols
+  cleaned = cleaned.replace(/[🏠🚨💰📱✨🔥⚡💎📈🏃‍♂️💨📞🎵♪]/gu, "")
+  // Replace bullet points with "and"
+  cleaned = cleaned.replace(/[•·]/g, "and")
+  // Replace & with "and"
+  cleaned = cleaned.replace(/&/g, "and")
+  // Remove hashtags
+  cleaned = cleaned.replace(/#\w+/g, "")
+  // Remove @ mentions
+  cleaned = cleaned.replace(/@\w+/g, "")
+
+  // Step 7: Clean up multiple spaces and normalize whitespace
+  cleaned = cleaned.replace(/\s+/g, " ").trim()
+
+  // Step 8: Restore preserved patterns
+  Object.keys(preservePatterns).forEach((placeholder) => {
+    cleaned = cleaned.replace(placeholder, preservePatterns[placeholder])
+  })
+
+  return cleaned
+}
+
+// Helper function to convert numbers to words
+function numberToWords(num: number): string {
+  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+
+  if (num >= 0 && num <= 10) {
+    return ones[num]
+  }
+
+  // For numbers > 10, return as string (we only convert 1-10)
+  return num.toString()
+}
+
+// Generate ElevenLabs Rachel voiceover with voice-optimized text cleaning
 async function generateRachelVoiceWithTiming(script: string): Promise<{
   success: boolean
   audioUrl?: string
@@ -25,9 +131,11 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
   wordTimings?: WordTiming[]
   duration?: number
   alignmentUsed?: boolean
+  originalScript?: string
+  cleanedScript?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover at 0.85x speed with alignment...")
+    console.log("🎤 Generating Rachel voiceover at 0.85x speed with voice-optimized text...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -38,17 +146,18 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       throw new Error("ElevenLabs API key appears invalid")
     }
 
-    // Clean script for TTS
-    const cleanScript = script
+    // Clean script specifically for natural TTS speech
+    const voiceOptimizedScript = cleanTextForVoice(script)
+    console.log("📝 Original script:", script.substring(0, 100) + "...")
+    console.log("🎙️ Voice-optimized script:", voiceOptimizedScript.substring(0, 100) + "...")
+
+    // Basic cleanup for TTS processing (remove remaining problematic chars)
+    const cleanScript = voiceOptimizedScript
       .replace(/[^\w\s.,!?'-]/g, " ")
       .replace(/\s+/g, " ")
-      .replace(/\$(\d+)/g, "$1 dollars")
-      .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
-      .replace(/(\d+)\s*bed/gi, "$1 bedroom")
-      .replace(/(\d+)\s*bath/gi, "$1 bathroom")
       .trim()
 
-    // Try to get alignment data with safe error handling
+    // Try to get alignment data with bulletproof error handling
     let alignmentData: any = null
     let alignmentUsed = false
 
@@ -72,7 +181,7 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
               similarity_boost: 0.85,
               style: 0.25,
               use_speaker_boost: true,
-              speaking_rate: 0.85, // 85% speed for better readability
+              speaking_rate: 0.85, // 85% speed for better clarity
             },
             output_format: "mp3_44100_128",
             apply_text_normalization: "auto",
@@ -83,31 +192,45 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       if (alignmentResponse.ok) {
         const alignmentResult = await alignmentResponse.json()
 
-        // Safe check for alignment data structure
+        // Bulletproof validation of alignment response structure
         if (
           alignmentResult &&
-          alignmentResult.alignment &&
+          typeof alignmentResult === "object" &&
+          alignmentResult.hasOwnProperty("alignment") &&
           Array.isArray(alignmentResult.alignment) &&
           alignmentResult.alignment.length > 0
         ) {
-          alignmentData = alignmentResult
-          alignmentUsed = true
-          console.log("✅ Got valid alignment data from ElevenLabs")
-          console.log(`📊 Alignment contains ${alignmentResult.alignment.length} timing points`)
+          // Additional validation - check if alignment items have required properties
+          const hasValidItems = alignmentResult.alignment.some(
+            (item: any) =>
+              item &&
+              typeof item === "object" &&
+              item.hasOwnProperty("character") &&
+              item.hasOwnProperty("start_time_seconds") &&
+              item.hasOwnProperty("end_time_seconds"),
+          )
+
+          if (hasValidItems) {
+            alignmentData = alignmentResult
+            alignmentUsed = true
+            console.log("✅ Got valid alignment data from ElevenLabs")
+            console.log(`📊 Alignment contains ${alignmentResult.alignment.length} timing points`)
+          } else {
+            console.warn("⚠️ No alignment data from ElevenLabs - alignment items missing required properties")
+          }
         } else {
-          console.warn("⚠️ No alignment data returned from ElevenLabs - response structure invalid")
-          console.log("Response structure:", JSON.stringify(alignmentResult, null, 2))
+          console.warn("⚠️ No alignment data from ElevenLabs - response structure invalid")
         }
       } else {
-        console.warn(`⚠️ ElevenLabs alignment API returned ${alignmentResponse.status}`)
+        console.warn(`⚠️ No alignment data from ElevenLabs - API returned ${alignmentResponse.status}`)
       }
     } catch (alignmentError) {
-      console.warn("⚠️ ElevenLabs alignment API failed:", alignmentError)
+      console.warn("⚠️ No alignment data from ElevenLabs - API call failed:", alignmentError)
       console.log("Continuing with fallback timing estimation...")
     }
 
-    // Generate the actual audio with 0.85x speed
-    console.log("🎵 Generating Rachel audio at 0.85x speed...")
+    // Generate the actual audio with voice-optimized script at 0.85x speed
+    console.log("🎵 Generating Rachel audio with voice-optimized text at 0.85x speed...")
 
     const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
       method: "POST",
@@ -117,7 +240,7 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
         "xi-api-key": apiKey,
       },
       body: JSON.stringify({
-        text: cleanScript,
+        text: cleanScript, // Use voice-optimized script for TTS
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.75,
@@ -145,12 +268,12 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
     const base64Audio = Buffer.from(arrayBuffer).toString("base64")
     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
-    // Generate word timings with safe alignment handling
-    const wordTimings = generateWordTimings(cleanScript, alignmentData, alignmentUsed)
+    // Generate word timings with safe alignment handling (use original script for caption mapping)
+    const wordTimings = generateWordTimings(script, alignmentData, alignmentUsed) // Use original script
     const totalDuration =
       wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(cleanScript)
 
-    console.log("✅ Rachel voice generated successfully")
+    console.log("✅ Rachel voice generated successfully with voice-optimized text")
     console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
     console.log(`🎯 Alignment used: ${alignmentUsed ? "Yes" : "No (fallback timing)"}`)
 
@@ -160,6 +283,8 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       wordTimings,
       duration: totalDuration,
       alignmentUsed,
+      originalScript: script,
+      cleanedScript: voiceOptimizedScript,
     }
   } catch (error) {
     console.error("❌ Rachel voice generation failed:", error)
@@ -167,34 +292,47 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       success: false,
       error: error instanceof Error ? error.message : "Voice generation failed",
       alignmentUsed: false,
+      originalScript: script,
     }
   }
 }
 
-// Generate word-level timing data with safe alignment handling
+// Generate word-level timing data with bulletproof alignment handling
 function generateWordTimings(script: string, alignmentData?: any, alignmentUsed?: boolean): WordTiming[] {
   const words = script.split(/\s+/).filter((word) => word.length > 0)
   const wordTimings: WordTiming[] = []
 
-  if (alignmentUsed && alignmentData && alignmentData.alignment && Array.isArray(alignmentData.alignment)) {
+  // Bulletproof alignment check
+  if (
+    alignmentUsed &&
+    alignmentData &&
+    typeof alignmentData === "object" &&
+    alignmentData.alignment &&
+    Array.isArray(alignmentData.alignment) &&
+    alignmentData.alignment.length > 0
+  ) {
     try {
       console.log("🎯 Using ElevenLabs alignment data for precise timing")
 
-      // Process alignment data safely
+      // Process alignment data with extra safety checks
       let wordIndex = 0
       let currentWord = ""
 
+      // Safe forEach with additional validation
       alignmentData.alignment.forEach((item: any, index: number) => {
+        // Multiple safety checks for each alignment item
         if (
           item &&
           typeof item === "object" &&
-          "character" in item &&
-          "start_time_seconds" in item &&
-          "end_time_seconds" in item
+          item.hasOwnProperty("character") &&
+          item.hasOwnProperty("start_time_seconds") &&
+          item.hasOwnProperty("end_time_seconds") &&
+          typeof item.start_time_seconds === "number" &&
+          typeof item.end_time_seconds === "number"
         ) {
-          const char = item.character
-          const startTime = typeof item.start_time_seconds === "number" ? item.start_time_seconds : 0
-          const endTime = typeof item.end_time_seconds === "number" ? item.end_time_seconds : startTime + 0.1
+          const char = String(item.character || "")
+          const startTime = Math.max(0, item.start_time_seconds)
+          const endTime = Math.max(startTime + 0.1, item.end_time_seconds)
 
           if (char && char.trim()) {
             currentWord += char
@@ -204,8 +342,8 @@ function generateWordTimings(script: string, alignmentData?: any, alignmentUsed?
               if (currentWord.trim() && wordIndex < words.length) {
                 wordTimings.push({
                   word: currentWord.trim(),
-                  startTime: Math.max(0, startTime),
-                  endTime: Math.max(startTime + 0.1, endTime),
+                  startTime,
+                  endTime,
                 })
                 wordIndex++
               }
@@ -230,11 +368,11 @@ function generateWordTimings(script: string, alignmentData?: any, alignmentUsed?
       }
     } catch (alignmentError) {
       console.error("❌ Error processing alignment data:", alignmentError)
-      console.log("Falling back to estimated timing...")
+      console.warn("⚠️ No alignment data from ElevenLabs - falling back to estimated timing")
       return generateFallbackWordTimings(words, 0)
     }
   } else {
-    console.log("🔄 Using fallback word timing estimation")
+    console.warn("⚠️ No alignment data from ElevenLabs - using fallback word timing estimation")
     return generateFallbackWordTimings(words, 0)
   }
 
@@ -287,9 +425,9 @@ function estimateDuration(script: string): number {
   return Math.max(35, (wordCount / (150 * 0.85)) * 60)
 }
 
-// Generate sentence-level captions as fallback with 500ms delay
+// Generate sentence-level captions as fallback with 500ms delay (using original script)
 function generateSentenceCaptions(
-  script: string,
+  originalScript: string,
   totalDuration: number,
 ): Array<{
   text: string
@@ -297,10 +435,10 @@ function generateSentenceCaptions(
   startTime: number
   endTime: number
 }> {
-  console.log("📝 Generating sentence-level captions with 500ms delay")
+  console.log("📝 Generating sentence-level captions with 500ms delay using original script")
 
-  // Split into sentences
-  const sentences = script
+  // Split into sentences using original script for captions
+  const sentences = originalScript
     .replace(/[^\w\s.,!?'-]/g, " ")
     .replace(/\s+/g, " ")
     .split(/[.!?]+/)
@@ -334,7 +472,7 @@ function generateSentenceCaptions(
     })
   })
 
-  console.log(`✅ Generated ${captions.length} sentence-level captions`)
+  console.log(`✅ Generated ${captions.length} sentence-level captions from original script`)
   return captions
 }
 
@@ -403,20 +541,22 @@ export async function POST(request: NextRequest) {
     const totalDuration = audioResult.duration || estimateDuration(data.script)
     const timePerImage = Math.max(3, Math.floor(totalDuration / data.imageUrls.length))
 
-    // Step 3: Generate captions with fallback handling
+    // Step 3: Generate captions with fallback handling (use original script for captions)
     let captions: Array<{ text: string; words: WordTiming[]; startTime: number; endTime: number }>
 
     if (audioResult.wordTimings && audioResult.wordTimings.length > 0) {
-      console.log("✅ Using word-based captions")
+      console.log("✅ Using word-based captions from original script")
       captions = generateWordBasedCaptions(audioResult.wordTimings, totalDuration)
     } else {
-      console.log("⚠️ Falling back to sentence-level captions")
-      captions = generateSentenceCaptions(data.script, totalDuration)
+      console.log("⚠️ Falling back to sentence-level captions from original script")
+      captions = generateSentenceCaptions(data.script, totalDuration) // Use original script
     }
 
     console.log(`📊 Video: ${totalDuration.toFixed(1)}s duration, ${timePerImage}s per image`)
-    console.log(`🎤 Rachel voice: 0.85x speed, alignment: ${audioResult.alignmentUsed ? "Yes" : "No"}`)
-    console.log(`📝 Captions: ${captions.length} chunks with 500ms delay`)
+    console.log(
+      `🎤 Rachel voice: 0.85x speed, voice-optimized text, alignment: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
+    )
+    console.log(`📝 Captions: ${captions.length} chunks with 500ms delay from original script`)
 
     // Return everything needed for client-side video generation
     return NextResponse.json({
