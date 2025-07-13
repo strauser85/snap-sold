@@ -17,32 +17,14 @@ interface WordTiming {
   endTime: number
 }
 
-// Comprehensive script sanitization for JSON and TTS safety
+// JavaScript sanitization function for ElevenLabs JSON safety
 function sanitizeScript(text: string): string {
-  console.log("🧹 Sanitizing script for ElevenLabs JSON payload...")
-  console.log("📝 Original text length:", text.length)
-  console.log("🔍 Original sample:", text.substring(0, 100))
-
-  const sanitized = text
-    // Remove ALL non-ASCII characters (emojis, symbols, etc.)
-    .replace(/[^\x00-\x7F]/g, "")
-    // Replace smart quotes with normal quotes
-    .replace(/[""'']/g, '"')
-    // Replace em-dashes and en-dashes with hyphens
-    .replace(/[—–]/g, "-")
-    // Replace ellipsis with three periods
-    .replace(/…/g, "...")
-    // Remove any remaining problematic characters
-    .replace(/[^\x20-\x7E]/g, " ")
-    // Clean up multiple spaces
-    .replace(/\s+/g, " ")
-    // Trim whitespace
+  return text
+    .replace(/[^\x00-\x7F]/g, "") // Remove non-ASCII characters (emojis, corrupted UTF)
+    .replace(/[""'']/g, '"') // Replace smart quotes
+    .replace(/[\u2013\u2014]/g, "-") // Replace em/en dashes
+    .replace(/\s+/g, " ") // Normalize whitespace
     .trim()
-
-  console.log("✅ Sanitized for ElevenLabs - length:", sanitized.length)
-  console.log("🔍 Sanitized sample:", sanitized.substring(0, 100))
-
-  return sanitized
 }
 
 // Comprehensive script sanitization for ElevenLabs API
@@ -110,29 +92,30 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       throw new Error("ElevenLabs API key appears invalid")
     }
 
-    // Step 1: Sanitize the script for ElevenLabs
-    const sanitizedScript = sanitizeScriptForElevenLabs(script)
+    // Step 1: Apply the sanitization function before ElevenLabs
+    const cleanScript = sanitizeScript(script)
 
-    // Step 2: Validate UTF-8 encoding
-    if (!validateUTF8(sanitizedScript)) {
-      throw new Error("Script contains invalid UTF-8 characters after sanitization")
-    }
+    // Log the cleaned script for verification
+    console.log("🧹 SANITIZED SCRIPT FOR ELEVENLABS:")
+    console.log("📝 Original length:", script.length)
+    console.log("📝 Cleaned length:", cleanScript.length)
+    console.log("🔍 Cleaned script:", cleanScript)
 
-    // Step 3: Validate script length
-    if (sanitizedScript.length === 0) {
+    // Step 2: Validate cleaned script
+    if (cleanScript.length === 0) {
       throw new Error("Script is empty after sanitization")
     }
 
-    if (sanitizedScript.length > 5000) {
+    if (cleanScript.length > 5000) {
       throw new Error("Script too long for ElevenLabs (max 5000 characters after sanitization)")
     }
 
     console.log("📝 Original script:", script.substring(0, 100) + "...")
-    console.log("🧹 Sanitized script:", sanitizedScript.substring(0, 100) + "...")
+    console.log("🧹 Sanitized script:", cleanScript.substring(0, 100) + "...")
 
-    // Step 4: Prepare the request payload with proper JSON formatting
+    // Step 4: Prepare the request payload with cleaned script
     const requestPayload = {
-      text: sanitizedScript, // Use sanitized script
+      text: cleanScript, // Use sanitized script
       model_id: "eleven_monolingual_v1",
       voice_settings: {
         stability: 0.75,
@@ -145,6 +128,9 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       enable_logging: false,
       timestamps: "word", // Enable word-level timestamps
     }
+
+    console.log("📦 ElevenLabs payload prepared with cleaned script")
+    console.log("🔍 Final payload text:", requestPayload.text)
 
     console.log("📦 Request payload prepared with sanitized text")
     console.log("🔍 Payload text sample:", requestPayload.text.substring(0, 50) + "...")
@@ -225,7 +211,7 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
     }
 
     const totalDuration =
-      wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(sanitizedScript)
+      wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(cleanScript)
 
     console.log("✅ Rachel voice generated successfully with sanitized script")
     console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
@@ -238,7 +224,7 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       duration: totalDuration,
       alignmentUsed,
       originalScript: script,
-      sanitizedScript: sanitizedScript,
+      sanitizedScript: cleanScript,
     }
   } catch (error) {
     console.error("❌ Rachel voice generation failed:", error)
