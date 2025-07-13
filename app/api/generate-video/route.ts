@@ -1,120 +1,103 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-interface PropertyInput {
-  address: string
-  price: number
-  bedrooms: number
-  bathrooms: number
-  sqft: number
-  propertyDescription?: string
-  script: string
-  imageUrls: string[]
-}
-
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 VIDEO GENERATION API CALLED")
+    console.log("🎬 Simple video generation API called")
 
-    const propertyData: PropertyInput = await request.json()
-    console.log("📝 Request data received:", {
-      address: propertyData.address,
-      imageCount: propertyData.imageUrls?.length || 0,
-      scriptLength: propertyData.script?.length || 0,
-    })
+    const body = await request.json()
+    console.log("📝 Request body received:", Object.keys(body))
 
-    // Validate required data
-    if (
-      !propertyData.address ||
-      !propertyData.price ||
-      !propertyData.script ||
-      !propertyData.imageUrls ||
-      propertyData.imageUrls.length === 0
-    ) {
-      console.error("❌ Missing required data")
-      return NextResponse.json(
-        {
-          error: "Missing required property data",
-          details: "Address, price, script, and at least one image are required",
+    // Basic validation
+    if (!body.address || !body.script || !body.imageUrls || body.imageUrls.length === 0) {
+      console.error("❌ Missing required fields")
+      return NextResponse.json({ error: "Missing required fields: address, script, and imageUrls" }, { status: 400 })
+    }
+
+    console.log(`✅ Validation passed: ${body.imageUrls.length} images, script length: ${body.script.length}`)
+
+    // Generate ElevenLabs audio
+    let audioUrl = ""
+    try {
+      console.log("🎤 Generating ElevenLabs audio...")
+
+      if (!process.env.ELEVENLABS_API_KEY) {
+        throw new Error("ElevenLabs API key not configured")
+      }
+
+      const cleanScript = body.script
+        .replace(/[^\w\s.,!?'-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+
+      const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+        method: "POST",
+        headers: {
+          Accept: "audio/mpeg",
+          "Content-Type": "application/json",
+          "xi-api-key": process.env.ELEVENLABS_API_KEY,
         },
-        { status: 400 },
-      )
+        body: JSON.stringify({
+          text: cleanScript,
+          model_id: "eleven_monolingual_v1",
+          voice_settings: {
+            stability: 0.6,
+            similarity_boost: 0.8,
+          },
+        }),
+      })
+
+      if (response.ok) {
+        const audioBlob = await response.blob()
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        const base64Audio = Buffer.from(arrayBuffer).toString("base64")
+        audioUrl = `data:audio/mpeg;base64,${base64Audio}`
+        console.log("✅ ElevenLabs audio generated successfully")
+      } else {
+        console.log("⚠️ ElevenLabs failed, continuing without audio")
+      }
+    } catch (error) {
+      console.log("⚠️ Audio generation failed:", error)
     }
 
-    console.log("✅ Data validation passed")
+    // Calculate timing
+    const wordCount = body.script.split(" ").length
+    const estimatedDuration = Math.max(30, wordCount * 0.5)
+    const timePerImage = Math.max(3, Math.floor(estimatedDuration / body.imageUrls.length))
+    const totalDuration = body.imageUrls.length * timePerImage
 
-    // Call ElevenLabs slideshow API
-    console.log("🎤 Calling ElevenLabs slideshow API...")
+    console.log(`📊 Timing calculated: ${timePerImage}s per image, ${totalDuration}s total`)
 
-    const slideshowResponse = await fetch(`${request.nextUrl.origin}/api/elevenlabs-slideshow`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        imageUrls: propertyData.imageUrls,
-        script: propertyData.script,
-        propertyData: {
-          address: propertyData.address,
-          price: propertyData.price,
-          bedrooms: propertyData.bedrooms,
-          bathrooms: propertyData.bathrooms,
-          sqft: propertyData.sqft,
-          propertyDescription: propertyData.propertyDescription,
-        },
-      }),
-    })
-
-    console.log("📡 Slideshow API response:", slideshowResponse.status)
-
-    if (!slideshowResponse.ok) {
-      const errorData = await slideshowResponse.json()
-      console.error("❌ Slideshow API error:", errorData)
-      throw new Error(errorData.error || "ElevenLabs slideshow preparation failed")
-    }
-
-    const slideshowData = await slideshowResponse.json()
-    console.log("✅ Slideshow data received:", {
-      hasAudio: !!slideshowData.audioUrl,
-      imageCount: slideshowData.slideshow?.images?.length || 0,
-    })
-
-    if (!slideshowData.success) {
-      throw new Error("ElevenLabs slideshow configuration failed")
-    }
-
-    console.log("🎉 Video generation setup completed successfully")
-
+    // Return success response
     return NextResponse.json({
       success: true,
-      method: "elevenlabs-slideshow",
-      audioUrl: slideshowData.audioUrl,
-      slideshowConfig: slideshowData.slideshow,
-      script: propertyData.script,
+      slideshowConfig: {
+        images: body.imageUrls,
+        timePerImage,
+        totalDuration,
+        audioUrl,
+        format: {
+          width: 576,
+          height: 1024,
+          fps: 30,
+        },
+      },
+      script: body.script,
       listing: {
-        address: propertyData.address,
-        price: propertyData.price,
-        bedrooms: propertyData.bedrooms,
-        bathrooms: propertyData.bathrooms,
-        sqft: propertyData.sqft,
-        customFeatures: propertyData.propertyDescription || null,
+        address: body.address,
+        price: body.price,
       },
       metadata: {
-        generatedAt: new Date().toISOString(),
-        format: "ElevenLabs Slideshow (9:16)",
-        imageCount: propertyData.imageUrls.length,
-        timePerImage: slideshowData.slideshow.timePerImage,
-        totalDuration: slideshowData.slideshow.totalDuration,
-        hasAudio: true,
-        audioMethod: "elevenlabs",
-        allImagesUsed: true,
+        imageCount: body.imageUrls.length,
+        hasAudio: !!audioUrl,
       },
     })
   } catch (error) {
-    console.error("❌ VIDEO GENERATION ERROR:", error)
+    console.error("❌ Video generation API error:", error)
 
     return NextResponse.json(
       {
-        error: "Video generation failed",
+        error: "Video generation setup failed",
         details: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )

@@ -21,7 +21,7 @@ import {
   Upload,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { SimpleSlideshowGenerator } from "@/components/simple-slideshow-generator"
+import { UltraSimpleGenerator } from "@/components/ultra-simple-generator"
 
 interface GenerationProgress {
   step: string
@@ -608,7 +608,7 @@ export default function VideoGenerator() {
                   </div>
                 </div>
               ) : showGenerator && slideshowConfig ? (
-                <SimpleSlideshowGenerator
+                <UltraSimpleGenerator
                   config={slideshowConfig}
                   onVideoGenerated={(videoUrl) => {
                     setResult({
