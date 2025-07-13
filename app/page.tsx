@@ -16,17 +16,12 @@ import {
   XCircle,
   ImageIcon,
   Wand2,
-  Grid3X3,
-  List,
-  Info,
   FileText,
   Volume2,
   Upload,
-  ArrowUpDown,
-  Sparkles,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { CanvasSlideshowGenerator } from "@/components/canvas-slideshow-generator"
+import { SimpleSlideshowGenerator } from "@/components/simple-slideshow-generator"
 
 interface GenerationProgress {
   step: string
@@ -48,20 +43,6 @@ interface UploadedImage {
   id: string
   isUploading?: boolean
   uploadError?: string
-  roomType?: string
-  features?: string[]
-  description?: string
-  confidence?: number
-  suggestedOrder?: number
-}
-
-interface ImageAnalysis {
-  url: string
-  roomType: string
-  features: string[]
-  description: string
-  confidence: number
-  suggestedOrder: number
 }
 
 export default function VideoGenerator() {
@@ -73,23 +54,20 @@ export default function VideoGenerator() {
   const [propertyDescription, setPropertyDescription] = useState("")
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [generatedScript, setGeneratedScript] = useState("")
-  const [imageViewMode, setImageViewMode] = useState<"grid" | "list">("grid")
   const [scriptMethod, setScriptMethod] = useState<string>("")
 
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
-  const [isAnalyzingImages, setIsAnalyzingImages] = useState(false)
   const [progress, setProgress] = useState<GenerationProgress | null>(null)
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
+  const [showGenerator, setShowGenerator] = useState(false)
+
   const MAX_IMAGES = 20
 
-  const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
-  const [showCanvasGenerator, setShowCanvasGenerator] = useState(false)
-  const [imagesArranged, setImagesArranged] = useState(false)
-
-  // Compress image to reduce file size
+  // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
@@ -97,12 +75,10 @@ export default function VideoGenerator() {
       const img = new Image()
 
       img.onload = () => {
-        // Calculate new dimensions
         const ratio = Math.min(maxWidth / img.width, maxWidth / img.height)
         canvas.width = img.width * ratio
         canvas.height = img.height * ratio
 
-        // Draw and compress
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
         canvas.toBlob(
           (blob) => {
@@ -121,7 +97,7 @@ export default function VideoGenerator() {
     })
   }
 
-  // Upload image to Vercel Blob
+  // Upload to blob
   const uploadImageToBlob = async (file: File): Promise<string> => {
     const formData = new FormData()
     formData.append("file", file)
@@ -149,7 +125,6 @@ export default function VideoGenerator() {
         const file = files[i]
         const imageId = `img-${Date.now()}-${i}`
 
-        // Add image to state immediately with uploading status
         const newImage: UploadedImage = {
           file,
           previewUrl: URL.createObjectURL(file),
@@ -159,31 +134,14 @@ export default function VideoGenerator() {
 
         setUploadedImages((prev) => [...prev, newImage])
 
-        // Compress and upload in background
         try {
-          console.log(`Compressing image ${i + 1}...`)
           const compressedFile = await compressImage(file)
-          console.log(`Original: ${file.size} bytes, Compressed: ${compressedFile.size} bytes`)
-
-          console.log(`Uploading image ${i + 1} to blob storage...`)
           const blobUrl = await uploadImageToBlob(compressedFile)
 
-          // Update image with blob URL
           setUploadedImages((prev) =>
-            prev.map((img) =>
-              img.id === imageId
-                ? {
-                    ...img,
-                    blobUrl,
-                    isUploading: false,
-                  }
-                : img,
-            ),
+            prev.map((img) => (img.id === imageId ? { ...img, blobUrl, isUploading: false } : img)),
           )
-
-          console.log(`Image ${i + 1} uploaded successfully:`, blobUrl)
         } catch (error) {
-          console.error(`Failed to upload image ${i + 1}:`, error)
           setUploadedImages((prev) =>
             prev.map((img) =>
               img.id === imageId
@@ -197,9 +155,6 @@ export default function VideoGenerator() {
           )
         }
       }
-
-      // Reset arrangement status when new images are added
-      setImagesArranged(false)
     }
   }
 
@@ -211,23 +166,6 @@ export default function VideoGenerator() {
       }
       return prev.filter((img) => img.id !== id)
     })
-    setImagesArranged(false)
-  }
-
-  const moveImage = (id: string, direction: "up" | "down") => {
-    setUploadedImages((prev) => {
-      const currentIndex = prev.findIndex((img) => img.id === id)
-      if (currentIndex === -1) return prev
-
-      const newIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
-      if (newIndex < 0 || newIndex >= prev.length) return prev
-
-      const newArray = [...prev]
-      const [movedItem] = newArray.splice(currentIndex, 1)
-      newArray.splice(newIndex, 0, movedItem)
-      return newArray
-    })
-    setImagesArranged(false)
   }
 
   const generateAIScript = async () => {
@@ -238,16 +176,11 @@ export default function VideoGenerator() {
 
     setIsGeneratingScript(true)
     setError(null)
-    setScriptMethod("")
 
     try {
-      console.log("Calling script generation API...")
-
       const response = await fetch("/api/generate-script", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           address,
           price: Number(price),
@@ -259,120 +192,29 @@ export default function VideoGenerator() {
         }),
       })
 
-      console.log("API response status:", response.status)
-
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error("API error:", errorText)
-        throw new Error(`API returned ${response.status}: ${errorText}`)
+        throw new Error(`API returned ${response.status}`)
       }
 
       const data = await response.json()
-      console.log("Script generated successfully:", data.method)
-
       setGeneratedScript(data.script)
       setScriptMethod(data.method)
-      setImagesArranged(false) // Reset arrangement when script changes
     } catch (err) {
-      console.error("Script generation failed:", err)
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
-      // Fallback to basic script if API completely fails
+      // Fallback script
       let basicScript = `🏡 Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of luxurious living space.`
 
-      // Include property description in fallback if provided
       if (propertyDescription.trim()) {
         basicScript += ` ${propertyDescription.trim()}`
       }
 
-      basicScript += ` Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity you won't want to miss! Schedule a tour today! 📞✨`
+      basicScript += ` Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Contact me today! 📞✨`
 
       setGeneratedScript(basicScript)
-      setScriptMethod("emergency")
+      setScriptMethod("fallback")
     } finally {
       setIsGeneratingScript(false)
-    }
-  }
-
-  const arrangeImagesIntelligently = async () => {
-    if (!generatedScript || uploadedImages.length === 0) {
-      setError("Please generate a script and upload images first.")
-      return
-    }
-
-    const successfulImages = uploadedImages.filter((img) => img.blobUrl)
-    if (successfulImages.length === 0) {
-      setError("No images are ready for analysis.")
-      return
-    }
-
-    setIsAnalyzingImages(true)
-    setError(null)
-
-    try {
-      console.log("🔍 Analyzing images for smart arrangement...")
-
-      const imageUrls = successfulImages.map((img) => img.blobUrl!)
-
-      const response = await fetch("/api/analyze-images", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          imageUrls,
-          script: generatedScript,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Image analysis failed")
-      }
-
-      const analysisData = await response.json()
-
-      if (analysisData.success) {
-        console.log("✅ Image analysis complete")
-
-        // Update images with analysis data and reorder
-        const arrangedImages: UploadedImage[] = []
-
-        analysisData.arrangedImages.forEach((analysis: ImageAnalysis) => {
-          const originalImage = successfulImages.find((img) => img.blobUrl === analysis.url)
-          if (originalImage) {
-            arrangedImages.push({
-              ...originalImage,
-              roomType: analysis.roomType,
-              features: analysis.features,
-              description: analysis.description,
-              confidence: analysis.confidence,
-              suggestedOrder: analysis.suggestedOrder,
-            })
-          }
-        })
-
-        // Add any images that weren't analyzed (failed uploads, etc.)
-        uploadedImages.forEach((img) => {
-          if (!img.blobUrl || !arrangedImages.find((arranged) => arranged.id === img.id)) {
-            arrangedImages.push(img)
-          }
-        })
-
-        setUploadedImages(arrangedImages)
-        setImagesArranged(true)
-
-        console.log(
-          `📊 Images arranged: ${analysisData.summary.totalImages} total, ${analysisData.summary.averageConfidence.toFixed(2)} avg confidence`,
-        )
-      } else {
-        throw new Error("Image analysis failed")
-      }
-    } catch (err) {
-      console.error("Image arrangement failed:", err)
-      setError(err instanceof Error ? err.message : "Failed to arrange images.")
-    } finally {
-      setIsAnalyzingImages(false)
     }
   }
 
@@ -382,23 +224,9 @@ export default function VideoGenerator() {
       return
     }
 
-    // Check if all images are uploaded
-    const uploadingImages = uploadedImages.filter((img) => img.isUploading)
-    const failedImages = uploadedImages.filter((img) => img.uploadError)
-
-    if (uploadingImages.length > 0) {
-      setError(`Please wait for ${uploadingImages.length} image(s) to finish uploading.`)
-      return
-    }
-
-    if (failedImages.length > 0) {
-      setError(`${failedImages.length} image(s) failed to upload. Please remove them and try again.`)
-      return
-    }
-
     const successfulImages = uploadedImages.filter((img) => img.blobUrl)
     if (successfulImages.length === 0) {
-      setError("No images were successfully uploaded. Please try uploading again.")
+      setError("No images were successfully uploaded.")
       return
     }
 
@@ -408,24 +236,13 @@ export default function VideoGenerator() {
     setProgress(null)
 
     try {
-      setProgress({ step: `Preparing slideshow with ${successfulImages.length} images...`, progress: 25 })
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      setProgress({ step: "Preparing video generation...", progress: 25 })
 
-      setProgress({ step: "Generating ElevenLabs AI voiceover...", progress: 50 })
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
-      setProgress({ step: "Setting up intelligent slideshow generator...", progress: 75 })
-
-      // Use arranged image order (or original order if not arranged)
-      const imageUrls = successfulImages
-        .sort((a, b) => (a.suggestedOrder || 0) - (b.suggestedOrder || 0))
-        .map((img) => img.blobUrl!)
+      const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
       const response = await fetch("/api/generate-video", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           address,
           price: Number(price),
@@ -446,26 +263,22 @@ export default function VideoGenerator() {
       const data = await response.json()
 
       if (data.success && data.slideshowConfig) {
-        console.log("✅ Intelligent slideshow configuration ready!")
-
-        // Set up Canvas slideshow
         setSlideshowConfig({
           images: imageUrls,
           timePerImage: data.slideshowConfig.timePerImage,
           totalDuration: data.slideshowConfig.totalDuration,
           audioUrl: data.audioUrl,
-          audioMethod: data.audioMethod,
           format: data.slideshowConfig.format,
         })
 
-        setShowCanvasGenerator(true)
-        setProgress({ step: "Intelligent slideshow ready! Click generate below.", progress: 100 })
+        setShowGenerator(true)
+        setProgress({ step: "Video generator ready!", progress: 100 })
       } else {
-        throw new Error("Failed to prepare intelligent slideshow")
+        throw new Error("Failed to prepare video generation")
       }
     } catch (err) {
       console.error("Generation error:", err)
-      setError(err instanceof Error ? err.message : "Slideshow preparation failed")
+      setError(err instanceof Error ? err.message : "Video generation failed")
     } finally {
       setIsLoading(false)
     }
@@ -486,8 +299,7 @@ export default function VideoGenerator() {
     setError(null)
     setProgress(null)
     setSlideshowConfig(null)
-    setShowCanvasGenerator(false)
-    setImagesArranged(false)
+    setShowGenerator(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -501,7 +313,7 @@ export default function VideoGenerator() {
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">SnapSold</h1>
           <p className="text-lg text-gray-600 leading-relaxed">
-            Create viral TikTok videos with AI-powered scripts, intelligent image arrangement, and ElevenLabs voiceover
+            Create viral TikTok videos with AI-powered scripts and ElevenLabs voiceover
           </p>
         </div>
 
@@ -510,30 +322,26 @@ export default function VideoGenerator() {
           <CardContent className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="address" className="text-sm font-medium text-gray-700">
-                  Property Address
-                </Label>
+                <Label htmlFor="address">Property Address</Label>
                 <Input
                   id="address"
                   type="text"
                   placeholder="e.g., 123 Main St, Anytown, USA"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="h-12 text-base"
+                  className="h-12"
                   disabled={isLoading}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="price" className="text-sm font-medium text-gray-700">
-                  Price ($)
-                </Label>
+                <Label htmlFor="price">Price ($)</Label>
                 <Input
                   id="price"
                   type="number"
                   placeholder="e.g., 500000"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
-                  className="h-12 text-base"
+                  className="h-12"
                   disabled={isLoading}
                 />
               </div>
@@ -541,55 +349,45 @@ export default function VideoGenerator() {
 
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="bedrooms" className="text-sm font-medium text-gray-700">
-                  Bedrooms
-                </Label>
+                <Label htmlFor="bedrooms">Bedrooms</Label>
                 <Input
                   id="bedrooms"
                   type="number"
                   placeholder="e.g., 3"
                   value={bedrooms}
                   onChange={(e) => setBedrooms(e.target.value)}
-                  className="h-12 text-base"
+                  className="h-12"
                   disabled={isLoading}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="bathrooms" className="text-sm font-medium text-gray-700">
-                  Bathrooms
-                </Label>
+                <Label htmlFor="bathrooms">Bathrooms</Label>
                 <Input
                   id="bathrooms"
                   type="number"
                   placeholder="e.g., 2.5"
                   value={bathrooms}
                   onChange={(e) => setBathrooms(e.target.value)}
-                  className="h-12 text-base"
+                  className="h-12"
                   disabled={isLoading}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sqft" className="text-sm font-medium text-gray-700">
-                  Square Footage
-                </Label>
+                <Label htmlFor="sqft">Square Footage</Label>
                 <Input
                   id="sqft"
                   type="number"
                   placeholder="e.g., 2500"
                   value={sqft}
                   onChange={(e) => setSqft(e.target.value)}
-                  className="h-12 text-base"
+                  className="h-12"
                   disabled={isLoading}
                 />
               </div>
             </div>
 
-            {/* Property Description Field */}
             <div className="space-y-2">
-              <Label
-                htmlFor="property-description"
-                className="text-sm font-medium text-gray-700 flex items-center gap-2"
-              >
+              <Label htmlFor="property-description" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
                 Property Description & Key Features (Optional)
               </Label>
@@ -597,41 +395,20 @@ export default function VideoGenerator() {
                 id="property-description"
                 value={propertyDescription}
                 onChange={(e) => setPropertyDescription(e.target.value)}
-                placeholder="Describe unique features, amenities, recent upgrades, neighborhood highlights, or anything special you want emphasized in the voiceover... 
-
-Examples:
-• Recently renovated kitchen with granite countertops
-• Walking distance to top-rated schools
-• Private backyard with pool and deck
-• Smart home features throughout
-• Quiet cul-de-sac location"
-                className="min-h-[100px] text-base"
+                placeholder="Describe unique features, amenities, recent upgrades..."
+                className="min-h-[100px]"
                 disabled={isLoading}
               />
-              <p className="text-xs text-gray-500">
-                This description will be incorporated into your AI-generated script and voiceover to highlight what
-                makes this property special.
-              </p>
             </div>
 
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label htmlFor="images" className="text-sm font-medium text-gray-700">
+                <Label htmlFor="images">
                   Upload Property Images (Max {MAX_IMAGES})
                   <span className="ml-2 text-xs text-gray-500">
                     {uploadedCount} uploaded, {uploadingCount} uploading, {failedCount} failed
                   </span>
                 </Label>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setImageViewMode(imageViewMode === "grid" ? "list" : "grid")}
-                    className="h-8"
-                  >
-                    {imageViewMode === "grid" ? <List className="h-4 w-4" /> : <Grid3X3 className="h-4 w-4" />}
-                  </Button>
-                </div>
               </div>
 
               <Input
@@ -640,170 +417,64 @@ Examples:
                 multiple
                 accept="image/*"
                 onChange={handleImageUpload}
-                className="h-12 text-base file:text-indigo-600 file:font-medium"
+                className="h-12"
                 disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
               />
 
               {uploadingCount > 0 && (
                 <Alert>
                   <Upload className="h-4 w-4" />
-                  <AlertDescription>
-                    Uploading and compressing {uploadingCount} image(s)... Please wait before generating video.
-                  </AlertDescription>
+                  <AlertDescription>Uploading {uploadingCount} image(s)...</AlertDescription>
                 </Alert>
               )}
 
               {failedCount > 0 && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    {failedCount} image(s) failed to upload. Please remove them and try again.
-                  </AlertDescription>
+                  <AlertDescription>{failedCount} image(s) failed to upload.</AlertDescription>
                 </Alert>
               )}
 
-              {/* Smart Arrangement Button */}
-              {uploadedCount > 0 && generatedScript && !imagesArranged && (
-                <Alert>
-                  <Sparkles className="h-4 w-4" />
-                  <AlertDescription className="flex items-center justify-between">
-                    <span>Arrange images intelligently to match your voiceover content</span>
-                    <Button
-                      onClick={arrangeImagesIntelligently}
-                      disabled={isAnalyzingImages}
-                      variant="outline"
-                      size="sm"
-                      className="ml-2 bg-transparent"
-                    >
-                      {isAnalyzingImages ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          Analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <ArrowUpDown className="mr-1 h-3 w-3" />
-                          Smart Arrange
-                        </>
-                      )}
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {imagesArranged && (
-                <Alert>
-                  <CheckCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    ✅ Images intelligently arranged to match voiceover content! Room types detected and ordered for
-                    optimal flow.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {/* Image Display */}
               {uploadedImages.length > 0 && (
                 <div className="border rounded-lg p-4 bg-gray-50 max-h-80 overflow-y-auto">
-                  {imageViewMode === "grid" ? (
-                    <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                      {uploadedImages.map((img, index) => (
-                        <div key={img.id} className="relative group">
-                          <img
-                            src={img.previewUrl || "/placeholder.svg"}
-                            alt={`Property image ${index + 1}`}
-                            className="w-full h-20 object-cover rounded-md border border-gray-200"
-                          />
-                          <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
-                            {index + 1}
-                          </div>
-                          {img.roomType && (
-                            <div className="absolute bottom-1 left-1 bg-blue-500 bg-opacity-75 text-white text-xs px-1 rounded">
-                              {img.roomType.replace("_", " ")}
-                            </div>
-                          )}
-                          {img.isUploading && (
-                            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-md">
-                              <Loader2 className="h-4 w-4 text-white animate-spin" />
-                            </div>
-                          )}
-                          {img.uploadError && (
-                            <div className="absolute inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center rounded-md">
-                              <XCircle className="h-4 w-4 text-white" />
-                            </div>
-                          )}
-                          {img.blobUrl && (
-                            <div className="absolute top-1 right-6 bg-green-500 bg-opacity-75 rounded-full p-1">
-                              <CheckCircle className="h-3 w-3 text-white" />
-                            </div>
-                          )}
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            className="absolute top-1 right-1 h-5 w-5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => removeImage(img.id)}
-                            disabled={isLoading}
-                          >
-                            <XCircle className="h-3 w-3" />
-                          </Button>
+                  <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                    {uploadedImages.map((img, index) => (
+                      <div key={img.id} className="relative group">
+                        <img
+                          src={img.previewUrl || "/placeholder.svg"}
+                          alt={`Property image ${index + 1}`}
+                          className="w-full h-20 object-cover rounded-md border"
+                        />
+                        <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
+                          {index + 1}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {uploadedImages.map((img, index) => (
-                        <div key={img.id} className="flex items-center gap-3 p-2 bg-white rounded border">
-                          <img
-                            src={img.previewUrl || "/placeholder.svg"}
-                            alt={`Property image ${index + 1}`}
-                            className="w-12 h-12 object-cover rounded"
-                          />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">Image {index + 1}</p>
-                            <p className="text-xs text-gray-500">{img.file.name}</p>
-                            {img.roomType && (
-                              <p className="text-xs text-blue-600">
-                                {img.roomType.replace("_", " ")}
-                                {img.confidence && ` (${Math.round(img.confidence * 100)}% confidence)`}
-                              </p>
-                            )}
-                            {img.description && <p className="text-xs text-gray-400">{img.description}</p>}
-                            {img.isUploading && <p className="text-xs text-blue-500">Uploading...</p>}
-                            {img.uploadError && <p className="text-xs text-red-500">Upload failed</p>}
-                            {img.blobUrl && !img.roomType && <p className="text-xs text-green-500">Ready</p>}
+                        {img.isUploading && (
+                          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-md">
+                            <Loader2 className="h-4 w-4 text-white animate-spin" />
                           </div>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => moveImage(img.id, "up")}
-                              disabled={index === 0 || isLoading || imagesArranged}
-                              className="h-6 w-6 p-0"
-                            >
-                              ↑
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => moveImage(img.id, "down")}
-                              disabled={index === uploadedImages.length - 1 || isLoading || imagesArranged}
-                              className="h-6 w-6 p-0"
-                            >
-                              ↓
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => removeImage(img.id)}
-                              disabled={isLoading}
-                              className="h-6 w-6 p-0"
-                            >
-                              <XCircle className="h-3 w-3" />
-                            </Button>
+                        )}
+                        {img.uploadError && (
+                          <div className="absolute inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center rounded-md">
+                            <XCircle className="h-4 w-4 text-white" />
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        )}
+                        {img.blobUrl && (
+                          <div className="absolute top-1 right-6 bg-green-500 bg-opacity-75 rounded-full p-1">
+                            <CheckCircle className="h-3 w-3 text-white" />
+                          </div>
+                        )}
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute top-1 right-1 h-5 w-5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => removeImage(img.id)}
+                          disabled={isLoading}
+                        >
+                          <XCircle className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -811,24 +482,18 @@ Examples:
                 <div className="text-center text-gray-500 text-sm py-8 border-2 border-dashed border-gray-300 rounded-lg">
                   <ImageIcon className="h-12 w-12 mx-auto mb-2 text-gray-400" />
                   <p>No images uploaded yet.</p>
-                  <p className="text-xs">Upload up to {MAX_IMAGES} property images for your slideshow video</p>
+                  <p className="text-xs">Upload up to {MAX_IMAGES} property images</p>
                 </div>
               )}
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="generated-script" className="text-sm font-medium text-gray-700">
+                <Label htmlFor="generated-script">
                   AI-Generated TikTok Script
                   {scriptMethod && (
                     <span className="ml-2 text-xs text-gray-500">
-                      (
-                      {scriptMethod === "OpenAI"
-                        ? "AI-powered with custom details"
-                        : scriptMethod === "fallback"
-                          ? "Smart template with custom details"
-                          : "Basic template"}
-                      )
+                      ({scriptMethod === "OpenAI" ? "AI-powered" : "Template"})
                     </span>
                   )}
                 </Label>
@@ -855,32 +520,11 @@ Examples:
               <Textarea
                 id="generated-script"
                 value={generatedScript}
-                onChange={(e) => {
-                  setGeneratedScript(e.target.value)
-                  setImagesArranged(false) // Reset arrangement when script changes
-                }}
-                placeholder="Click 'Generate Script' to create an AI-powered TikTok script that incorporates your property description, or write your own..."
-                className="min-h-[120px] text-base"
+                onChange={(e) => setGeneratedScript(e.target.value)}
+                placeholder="Click 'Generate Script' to create an AI-powered TikTok script..."
+                className="min-h-[120px]"
                 disabled={isLoading}
               />
-              {scriptMethod === "fallback" && (
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertDescription>
-                    AI generation unavailable - using smart template with your custom details. You can edit the script
-                    above.
-                  </AlertDescription>
-                </Alert>
-              )}
-              {propertyDescription && scriptMethod && (
-                <Alert>
-                  <CheckCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Your property description has been incorporated into the script and will be included in the
-                    voiceover.
-                  </AlertDescription>
-                </Alert>
-              )}
             </div>
 
             <Button
@@ -897,15 +541,15 @@ Examples:
                 uploadingCount > 0 ||
                 uploadedCount === 0
               }
-              className="w-full h-12 text-base font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+              className="w-full h-12 text-base font-medium bg-indigo-600 hover:bg-indigo-700"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating Intelligent Slideshow...
+                  Preparing Video...
                 </>
               ) : (
-                `Generate ${imagesArranged ? "Intelligent" : ""} Slideshow Video (${uploadedCount} images ready)`
+                `Generate Video (${uploadedCount} images ready)`
               )}
             </Button>
           </CardContent>
@@ -934,25 +578,19 @@ Examples:
           </Alert>
         )}
 
-        {/* Video Preview Area */}
+        {/* Video Preview */}
         <Card className="shadow-lg border-0">
           <CardContent className="p-6">
             <div className="aspect-[9/16] bg-gray-100 rounded-lg flex items-center justify-center min-h-[400px] max-w-sm mx-auto">
               {result ? (
                 <div className="text-center space-y-4 w-full">
                   <div className="bg-black rounded-lg aspect-[9/16] flex items-center justify-center relative overflow-hidden">
-                    <video
-                      src={result.videoUrl}
-                      controls
-                      className="w-full h-full object-cover"
-                      poster="/placeholder.svg?height=400&width=225"
-                      preload="metadata"
-                    />
+                    <video src={result.videoUrl} controls className="w-full h-full object-cover" preload="metadata" />
                     <div className="absolute bottom-4 left-4 right-4 text-white bg-black bg-opacity-50 p-2 rounded">
                       <p className="text-sm font-medium">{result.listing?.address}</p>
                       <p className="text-xs opacity-80 flex items-center gap-1">
                         <Volume2 className="h-3 w-3" />
-                        {imagesArranged ? "Intelligent" : "Canvas"} Slideshow with {result.metadata?.imageCount} images!
+                        ElevenLabs Slideshow
                       </p>
                     </div>
                   </div>
@@ -961,42 +599,30 @@ Examples:
                     <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
                       Generate Another
                     </Button>
-                    {result.videoUrl && (
-                      <Button asChild className="flex-1">
-                        <a href={result.videoUrl} download="intelligent-property-slideshow.webm">
-                          <Download className="mr-2 h-4 w-4" />
-                          Download
-                        </a>
-                      </Button>
-                    )}
+                    <Button asChild className="flex-1">
+                      <a href={result.videoUrl} download="property-slideshow.webm">
+                        <Download className="mr-2 h-4 w-4" />
+                        Download
+                      </a>
+                    </Button>
                   </div>
                 </div>
-              ) : showCanvasGenerator && slideshowConfig ? (
-                <CanvasSlideshowGenerator
+              ) : showGenerator && slideshowConfig ? (
+                <SimpleSlideshowGenerator
                   config={slideshowConfig}
                   onVideoGenerated={(videoUrl) => {
                     setResult({
                       videoUrl,
                       audioUrl: slideshowConfig.audioUrl,
                       script: generatedScript,
-                      listing: {
-                        address,
-                        price: Number(price),
-                        bedrooms: Number(bedrooms),
-                        bathrooms: Number(bathrooms),
-                        sqft: Number(sqft),
-                      },
-                      metadata: {
-                        imageCount: slideshowConfig.images.length,
-                        duration: `${slideshowConfig.totalDuration}s`,
-                        method: imagesArranged ? "intelligent-slideshow" : "canvas-slideshow",
-                      },
+                      listing: { address, price: Number(price) },
+                      metadata: { imageCount: slideshowConfig.images.length },
                     })
-                    setShowCanvasGenerator(false)
+                    setShowGenerator(false)
                   }}
                   onError={(error) => {
                     setError(error)
-                    setShowCanvasGenerator(false)
+                    setShowGenerator(false)
                   }}
                 />
               ) : (
@@ -1004,8 +630,8 @@ Examples:
                   <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     <Play className="h-6 w-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500">Your intelligent slideshow will appear here</p>
-                  <p className="text-xs text-gray-400">AI-arranged images with ElevenLabs voiceover</p>
+                  <p className="text-sm text-gray-500">Your video will appear here</p>
+                  <p className="text-xs text-gray-400">ElevenLabs voiceover included</p>
                 </div>
               )}
             </div>

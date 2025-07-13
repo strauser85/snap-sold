@@ -13,8 +13,16 @@ interface PropertyInput {
 
 export async function POST(request: NextRequest) {
   try {
-    const propertyData: PropertyInput = await request.json()
+    console.log("🎬 VIDEO GENERATION API CALLED")
 
+    const propertyData: PropertyInput = await request.json()
+    console.log("📝 Request data received:", {
+      address: propertyData.address,
+      imageCount: propertyData.imageUrls?.length || 0,
+      scriptLength: propertyData.script?.length || 0,
+    })
+
+    // Validate required data
     if (
       !propertyData.address ||
       !propertyData.price ||
@@ -22,16 +30,22 @@ export async function POST(request: NextRequest) {
       !propertyData.imageUrls ||
       propertyData.imageUrls.length === 0
     ) {
-      return NextResponse.json({ error: "Missing required property data." }, { status: 400 })
+      console.error("❌ Missing required data")
+      return NextResponse.json(
+        {
+          error: "Missing required property data",
+          details: "Address, price, script, and at least one image are required",
+        },
+        { status: 400 },
+      )
     }
 
-    console.log(`🎬 CANVAS SLIDESHOW GENERATION (DEFAULT)`)
-    console.log(`📍 Property: ${propertyData.address}`)
-    console.log(`🖼️ Images: ${propertyData.imageUrls.length} (ALL WILL BE USED)`)
-    console.log(`📝 Script: ${propertyData.script.length} characters`)
+    console.log("✅ Data validation passed")
 
-    // Call Canvas slideshow API
-    const slideshowResponse = await fetch(`${request.nextUrl.origin}/api/canvas-slideshow`, {
+    // Call ElevenLabs slideshow API
+    console.log("🎤 Calling ElevenLabs slideshow API...")
+
+    const slideshowResponse = await fetch(`${request.nextUrl.origin}/api/elevenlabs-slideshow`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -48,24 +62,30 @@ export async function POST(request: NextRequest) {
       }),
     })
 
+    console.log("📡 Slideshow API response:", slideshowResponse.status)
+
     if (!slideshowResponse.ok) {
       const errorData = await slideshowResponse.json()
-      throw new Error(errorData.error || "Canvas slideshow preparation failed")
+      console.error("❌ Slideshow API error:", errorData)
+      throw new Error(errorData.error || "ElevenLabs slideshow preparation failed")
     }
 
     const slideshowData = await slideshowResponse.json()
+    console.log("✅ Slideshow data received:", {
+      hasAudio: !!slideshowData.audioUrl,
+      imageCount: slideshowData.slideshow?.images?.length || 0,
+    })
 
     if (!slideshowData.success) {
-      throw new Error("Canvas slideshow configuration failed")
+      throw new Error("ElevenLabs slideshow configuration failed")
     }
 
-    console.log("✅ Canvas slideshow configuration ready")
+    console.log("🎉 Video generation setup completed successfully")
 
     return NextResponse.json({
       success: true,
-      method: "canvas-slideshow",
+      method: "elevenlabs-slideshow",
       audioUrl: slideshowData.audioUrl,
-      audioError: slideshowData.audioError,
       slideshowConfig: slideshowData.slideshow,
       script: propertyData.script,
       listing: {
@@ -78,28 +98,23 @@ export async function POST(request: NextRequest) {
       },
       metadata: {
         generatedAt: new Date().toISOString(),
-        format: "Canvas Slideshow (9:16) - ALL IMAGES",
+        format: "ElevenLabs Slideshow (9:16)",
         imageCount: propertyData.imageUrls.length,
-        timePerImage: `${slideshowData.slideshow.timePerImage} seconds`,
-        totalDuration: `${slideshowData.slideshow.totalDuration} seconds`,
-        wordCount: propertyData.script.split(" ").length,
-        hasAudio: !!slideshowData.audioUrl,
-        hasCustomFeatures: !!propertyData.propertyDescription,
-        slideshowType: `Canvas Slideshow - ALL ${propertyData.imageUrls.length} Photos`,
-        method: "canvas-slideshow",
+        timePerImage: slideshowData.slideshow.timePerImage,
+        totalDuration: slideshowData.slideshow.totalDuration,
+        hasAudio: true,
+        audioMethod: "elevenlabs",
         allImagesUsed: true,
-        reliable: true,
-        cost: "free",
       },
     })
   } catch (error) {
-    console.error("❌ CANVAS SLIDESHOW ERROR:", error)
+    console.error("❌ VIDEO GENERATION ERROR:", error)
 
     return NextResponse.json(
       {
-        error: "Canvas slideshow generation failed.",
+        error: "Video generation failed",
         details: error instanceof Error ? error.message : String(error),
-        method: "canvas-slideshow",
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )
