@@ -24,6 +24,7 @@ import {
   Upload,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
+import { CanvasSlideshowGenerator } from "@/components/canvas-slideshow-generator"
 
 interface GenerationProgress {
   step: string
@@ -65,7 +66,10 @@ export default function VideoGenerator() {
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const MAX_IMAGES = 15
+  const MAX_IMAGES = 20
+
+  const [slideshowConfig, setSlideshowConfig] = useState<any>(null)
+  const [showCanvasGenerator, setShowCanvasGenerator] = useState(false)
 
   // Compress image to reduce file size
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
@@ -298,18 +302,15 @@ export default function VideoGenerator() {
     setProgress(null)
 
     try {
-      setProgress({ step: `Processing ${successfulImages.length} images...`, progress: 15 })
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      setProgress({ step: `Preparing Canvas slideshow with ${successfulImages.length} images...`, progress: 25 })
+      await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      setProgress({ step: "Generating professional AI voiceover (30-60 seconds)...", progress: 35 })
-      await new Promise((resolve) => setTimeout(resolve, 3000))
-
-      setProgress({ step: `Creating slideshow video with ${successfulImages.length} images...`, progress: 65 })
+      setProgress({ step: "Generating AI voiceover...", progress: 50 })
       await new Promise((resolve) => setTimeout(resolve, 2000))
 
-      setProgress({ step: "Merging audio and video...", progress: 85 })
+      setProgress({ step: "Setting up Canvas slideshow generator...", progress: 75 })
 
-      // Use blob URLs instead of base64
+      // Use blob URLs for Canvas slideshow
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
       const response = await fetch("/api/generate-video", {
@@ -329,50 +330,33 @@ export default function VideoGenerator() {
         }),
       })
 
-      let data
-      const contentType = response.headers.get("content-type")
-
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json()
-      } else {
-        const text = await response.text()
-        console.error("Non-JSON response:", text)
-        throw new Error(`Server error (${response.status}): Please try again in a few moments.`)
-      }
-
       if (!response.ok) {
-        if (response.status === 500 && data.error?.includes("voiceover")) {
-          throw new Error("AI voiceover service is temporarily unavailable. Please try again in a few minutes.")
-        } else if (response.status === 413) {
-          throw new Error("Request too large. Please use fewer images.")
-        } else {
-          throw new Error(data.error || `Server error: ${response.status}`)
-        }
+        const errorData = await response.json()
+        throw new Error(errorData.error || `Server error: ${response.status}`)
       }
 
-      setResult(data)
-      setProgress({
-        step: `Professional slideshow video with ${successfulImages.length} images generated!`,
-        progress: 100,
-      })
+      const data = await response.json()
+
+      if (data.success && data.slideshowConfig) {
+        console.log("✅ Canvas slideshow configuration ready!")
+
+        // Set up Canvas slideshow
+        setSlideshowConfig({
+          images: imageUrls,
+          timePerImage: data.slideshowConfig.timePerImage,
+          totalDuration: data.slideshowConfig.totalDuration,
+          audioUrl: data.audioUrl,
+          format: data.slideshowConfig.format,
+        })
+
+        setShowCanvasGenerator(true)
+        setProgress({ step: "Canvas slideshow ready! Click generate below.", progress: 100 })
+      } else {
+        throw new Error("Failed to prepare Canvas slideshow")
+      }
     } catch (err) {
       console.error("Generation error:", err)
-      let errorMessage = "An unexpected error occurred."
-
-      if (err instanceof Error) {
-        if (err.message.includes("voiceover")) {
-          errorMessage =
-            "AI voiceover generation failed. The service may be temporarily unavailable. Please try again in a few minutes."
-        } else if (err.message.includes("413") || err.message.includes("too large")) {
-          errorMessage = "Request too large. Please reduce the number of images or try smaller file sizes."
-        } else if (err.message.includes("JSON")) {
-          errorMessage = "Server communication error. Please try again."
-        } else {
-          errorMessage = err.message
-        }
-      }
-
-      setError(errorMessage)
+      setError(err instanceof Error ? err.message : "Canvas slideshow preparation failed")
     } finally {
       setIsLoading(false)
     }
@@ -392,6 +376,8 @@ export default function VideoGenerator() {
     setResult(null)
     setError(null)
     setProgress(null)
+    setSlideshowConfig(null)
+    setShowCanvasGenerator(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -405,7 +391,7 @@ export default function VideoGenerator() {
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">SnapSold</h1>
           <p className="text-lg text-gray-600 leading-relaxed">
-            Create viral TikTok videos with AI-powered scripts and up to 15 property images
+            Create viral TikTok videos with AI-powered scripts and up to 20 property images
           </p>
         </div>
 
@@ -797,48 +783,15 @@ Examples:
                       className="w-full h-full object-cover"
                       poster="/placeholder.svg?height=400&width=225"
                       preload="metadata"
-                      onError={(e) => {
-                        console.error("Video playback error:", e)
-                      }}
-                      onLoadedMetadata={(e) => {
-                        const video = e.target as HTMLVideoElement
-                        console.log("Video duration:", video.duration, "seconds")
-                      }}
                     />
                     <div className="absolute bottom-4 left-4 right-4 text-white bg-black bg-opacity-50 p-2 rounded">
-                      <p className="text-sm font-medium">{result.listing.address}</p>
+                      <p className="text-sm font-medium">{result.listing?.address}</p>
                       <p className="text-xs opacity-80 flex items-center gap-1">
                         <Volume2 className="h-3 w-3" />
-                        Slideshow with {result.metadata?.imageCount} images!
+                        Canvas Slideshow with {result.metadata?.imageCount} images!
                       </p>
                     </div>
                   </div>
-
-                  {/* Property Details */}
-                  {result.listing && (
-                    <div className="text-left space-y-3 text-sm bg-gray-50 p-4 rounded-lg">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <p className="font-medium text-gray-700">Address:</p>
-                          <p className="text-gray-600">{result.listing.address}</p>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-700">Price:</p>
-                          <p className="text-gray-600 font-semibold text-green-600">
-                            ${result.listing.price?.toLocaleString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-700">Images:</p>
-                          <p className="text-gray-600">{result.metadata?.imageCount} photos</p>
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-700">Duration:</p>
-                          <p className="text-gray-600">{result.metadata?.duration}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   <div className="flex gap-2">
                     <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
@@ -846,7 +799,7 @@ Examples:
                     </Button>
                     {result.videoUrl && (
                       <Button asChild className="flex-1">
-                        <a href={result.videoUrl} target="_blank" rel="noopener noreferrer">
+                        <a href={result.videoUrl} download="property-slideshow.webm">
                           <Download className="mr-2 h-4 w-4" />
                           Download
                         </a>
@@ -854,13 +807,41 @@ Examples:
                     )}
                   </div>
                 </div>
+              ) : showCanvasGenerator && slideshowConfig ? (
+                <CanvasSlideshowGenerator
+                  config={slideshowConfig}
+                  onVideoGenerated={(videoUrl) => {
+                    setResult({
+                      videoUrl,
+                      audioUrl: slideshowConfig.audioUrl,
+                      script: generatedScript,
+                      listing: {
+                        address,
+                        price: Number(price),
+                        bedrooms: Number(bedrooms),
+                        bathrooms: Number(bathrooms),
+                        sqft: Number(sqft),
+                      },
+                      metadata: {
+                        imageCount: slideshowConfig.images.length,
+                        duration: `${slideshowConfig.totalDuration}s`,
+                        method: "canvas-slideshow",
+                      },
+                    })
+                    setShowCanvasGenerator(false)
+                  }}
+                  onError={(error) => {
+                    setError(error)
+                    setShowCanvasGenerator(false)
+                  }}
+                />
               ) : (
                 <div className="text-center space-y-2">
                   <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto">
                     <Play className="h-6 w-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500">Your slideshow video will appear here</p>
-                  <p className="text-xs text-gray-400">Up to 15 images with AI voiceover</p>
+                  <p className="text-sm text-gray-500">Your Canvas slideshow will appear here</p>
+                  <p className="text-xs text-gray-400">Up to 20 images with AI voiceover</p>
                 </div>
               )}
             </div>
