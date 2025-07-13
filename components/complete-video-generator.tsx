@@ -222,34 +222,81 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw TikTok captions
+            // Draw TikTok captions with typewriter animation
             if (currentCaption) {
+              const captionProgress =
+                (elapsedSeconds - currentCaption.startTime) / (currentCaption.endTime - currentCaption.startTime)
               const words = currentCaption.text.split(" ")
-              const maxWordsPerLine = 3
+              const maxWordsPerLine = 4
               const lines: string[] = []
 
+              // Break text into lines
               for (let i = 0; i < words.length; i += maxWordsPerLine) {
                 lines.push(words.slice(i, i + maxWordsPerLine).join(" "))
               }
 
-              const fontSize = Math.floor(canvas.width * 0.09)
-              ctx.font = `900 ${fontSize}px Arial, sans-serif`
+              // Calculate total characters for typewriter effect
+              const fullText = lines.join(" ")
+              const totalChars = fullText.length
+              const charsToShow = Math.floor(captionProgress * totalChars)
+
+              // Font settings - smaller and more readable
+              const fontSize = Math.floor(canvas.width * 0.06) // Reduced from 0.09 to 0.06
+              ctx.font = `bold ${fontSize}px "Arial", "Helvetica", sans-serif`
               ctx.textAlign = "center"
 
-              const lineHeight = fontSize * 1.3
-              const startY = canvas.height * 0.72
+              const lineHeight = fontSize * 1.2
+              const totalHeight = lines.length * lineHeight
+              const startY = canvas.height * 0.8 // Moved up slightly from 0.72 to 0.8
 
-              lines.forEach((line, index) => {
-                const y = startY + index * lineHeight
+              let charCount = 0
 
-                // Shadow
-                ctx.strokeStyle = "#000000"
-                ctx.lineWidth = Math.floor(fontSize * 0.2)
-                ctx.strokeText(line, canvas.width / 2, y)
+              lines.forEach((line, lineIndex) => {
+                const y = startY + lineIndex * lineHeight
 
-                // Main text
-                ctx.fillStyle = "#FFFFFF"
-                ctx.fillText(line, canvas.width / 2, y)
+                // Calculate how many characters of this line to show
+                const lineStartChar = charCount
+                const lineEndChar = charCount + line.length
+
+                let visibleText = ""
+                if (charsToShow > lineStartChar) {
+                  const charsInThisLine = Math.min(charsToShow - lineStartChar, line.length)
+                  visibleText = line.substring(0, charsInThisLine)
+                }
+
+                if (visibleText.length > 0) {
+                  // Multiple shadow layers for better readability
+                  ctx.strokeStyle = "#000000"
+                  ctx.lineWidth = Math.floor(fontSize * 0.25)
+                  ctx.strokeText(visibleText, canvas.width / 2, y)
+
+                  // Secondary shadow for depth
+                  ctx.strokeStyle = "#333333"
+                  ctx.lineWidth = Math.floor(fontSize * 0.15)
+                  ctx.strokeText(visibleText, canvas.width / 2 + 1, y + 1)
+
+                  // Main text - clean white
+                  ctx.fillStyle = "#FFFFFF"
+                  ctx.fillText(visibleText, canvas.width / 2, y)
+
+                  // Add cursor effect at the end of current text
+                  if (charsToShow >= lineStartChar && charsToShow <= lineEndChar && visibleText.length > 0) {
+                    const textWidth = ctx.measureText(visibleText).width
+                    const cursorX = canvas.width / 2 + textWidth / 2 + 2
+
+                    // Blinking cursor effect
+                    const blinkRate = 2 // blinks per second
+                    const shouldShowCursor = Math.floor(elapsedSeconds * blinkRate) % 2 === 0
+
+                    if (shouldShowCursor && captionProgress < 0.95) {
+                      // Hide cursor near end
+                      ctx.fillStyle = "#FFFFFF"
+                      ctx.fillRect(cursorX, y - fontSize * 0.8, 2, fontSize * 0.9)
+                    }
+                  }
+                }
+
+                charCount += line.length + 1 // +1 for space between lines
               })
             }
 
