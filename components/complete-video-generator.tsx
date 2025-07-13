@@ -52,7 +52,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
   const audioRef = useRef<HTMLAudioElement>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [currentStep, setCurrentStep] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
@@ -99,7 +98,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
       setIsGenerating(true)
       setProgress(0)
-      setCurrentStep("Loading images...")
 
       try {
         const canvas = canvasRef.current
@@ -108,8 +106,8 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
         canvas.width = videoData.format.width
         canvas.height = videoData.format.height
 
-        console.log("🎬 Starting video generation with settings:")
-        console.log(`📊 Alignment used: ${videoData.metadata?.alignmentUsed ? "Yes" : "No"}`)
+        console.log("🎬 Starting video generation with precise timing:")
+        console.log(`📊 Word-level alignment: ${videoData.metadata?.alignmentUsed ? "Yes" : "No"}`)
         console.log(`📝 Caption type: ${videoData.metadata?.captionType || "unknown"}`)
         console.log(`⏱️ Caption delay: ${videoData.metadata?.captionDelay || 0}ms`)
 
@@ -129,7 +127,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           throw new Error("No images could be loaded")
         }
 
-        setCurrentStep("Setting up Rachel's voice (0.85x speed)...")
         setProgress(40)
 
         // Setup audio - DO NOT AUTOPLAY during generation
@@ -144,7 +141,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           audioElement.load()
         })
 
-        setCurrentStep("Recording video with 500ms delayed captions...")
         setProgress(50)
 
         // Setup recording with proper metadata
@@ -208,7 +204,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               throw new Error("No video data recorded")
             }
 
-            setCurrentStep("Creating final video with metadata...")
             setProgress(95)
 
             // Create video blob with proper metadata
@@ -228,7 +223,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
               setVideoUrl(videoUrl)
               onVideoGenerated(videoUrl)
-              setCurrentStep("Video with perfect sync ready!")
               setProgress(100)
               setIsGenerating(false)
             }
@@ -237,7 +231,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               // Fallback if metadata loading fails
               setVideoUrl(videoUrl)
               onVideoGenerated(videoUrl)
-              setCurrentStep("Video ready!")
               setProgress(100)
               setIsGenerating(false)
             }
@@ -260,7 +253,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
         audioElement.currentTime = 0
         await audioElement.play()
 
-        // Animation loop with 500ms delayed captions
+        // Animation loop with precise caption timing
         const startTime = Date.now()
         const durationMs = videoData.duration * 1000
         const timePerImageMs = videoData.timePerImage * 1000
@@ -278,7 +271,7 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
           // Calculate current image
           const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-          // Find current caption (already includes 500ms delay from API)
+          // Find current caption using precise timing (no artificial delay)
           const currentCaption = videoData.captions.find(
             (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds < caption.endTime,
           )
@@ -299,35 +292,35 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw captions with typewriter effect (500ms delayed, yellow text, black background)
+            // Draw captions with precise word timing
             if (currentCaption) {
               // Font settings - yellow text with black background
-              const fontSize = Math.floor(canvas.width * 0.05) // Slightly larger for better readability
+              const fontSize = Math.floor(canvas.width * 0.05)
               ctx.font = `900 ${fontSize}px "Arial Black", "Arial", sans-serif`
               ctx.textAlign = "center"
 
               // Calculate max width for text wrapping (90% of canvas width)
               const maxTextWidth = canvas.width * 0.9
 
-              // Typewriter effect calculation with 500ms delay built into timing
-              const captionDuration = currentCaption.endTime - currentCaption.startTime
-              const captionElapsed = elapsedSeconds - currentCaption.startTime
-              const captionProgress = Math.max(0, Math.min(1, captionElapsed / captionDuration))
-
-              // Determine visible text based on timing method
+              // Determine visible text based on precise timing
               let visibleText = ""
 
               if (videoData.metadata?.alignmentUsed && currentCaption.words && currentCaption.words.length > 0) {
-                // Word-by-word reveal for aligned captions (already includes 500ms delay)
+                // Word-by-word reveal using precise ElevenLabs timestamps
                 const visibleWords: string[] = []
                 currentCaption.words.forEach((wordTiming) => {
-                  if (elapsedSeconds >= wordTiming.startTime) {
+                  if (elapsedSeconds >= wordTiming.startTime && elapsedSeconds <= wordTiming.endTime) {
                     visibleWords.push(wordTiming.word)
                   }
                 })
                 visibleText = visibleWords.join(" ")
               } else {
-                // Character-by-character typewriter for sentence captions (500ms delay built in)
+                // Show full caption for sentence-based timing
+                const captionDuration = currentCaption.endTime - currentCaption.startTime
+                const captionElapsed = elapsedSeconds - currentCaption.startTime
+                const captionProgress = Math.max(0, Math.min(1, captionElapsed / captionDuration))
+
+                // Character-by-character typewriter for sentence captions
                 const totalChars = currentCaption.text.length
                 const charsToShow = Math.floor(captionProgress * totalChars)
                 visibleText = currentCaption.text.substring(0, charsToShow)
@@ -337,9 +330,9 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                 // Wrap text to prevent overflow
                 const wrappedLines = wrapText(ctx, visibleText, maxTextWidth)
 
-                const lineHeight = fontSize * 1.4 // More spacing between lines
-                const padding = fontSize * 0.5 // More padding around text
-                const startY = canvas.height * 0.72 // Centered in lower third
+                const lineHeight = fontSize * 1.4
+                const padding = fontSize * 0.5
+                const startY = canvas.height * 0.72
 
                 wrappedLines.forEach((line, lineIndex) => {
                   const y = startY + lineIndex * lineHeight
@@ -353,12 +346,12 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                     const boxX = (canvas.width - boxWidth) / 2
                     const boxY = y - fontSize * 0.85
 
-                    // Draw semi-transparent black background box with rounded corners effect
-                    ctx.fillStyle = "rgba(0, 0, 0, 0.85)" // Higher opacity for better contrast
+                    // Draw semi-transparent black background box
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.85)"
                     ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
-                    // Draw bright yellow text (perfectly centered)
-                    ctx.fillStyle = "#FFFF00" // Pure bright yellow
+                    // Draw bright yellow text
+                    ctx.fillStyle = "#FFFF00"
                     ctx.fillText(line, canvas.width / 2, y)
 
                     // Add subtle black outline for extra clarity
@@ -367,24 +360,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
                     ctx.strokeText(line, canvas.width / 2, y)
                   }
                 })
-
-                // Show typewriter cursor (blinking effect)
-                if (captionProgress < 0.98) {
-                  // Show cursor until almost complete
-                  const lastLine = wrappedLines[wrappedLines.length - 1]
-                  if (lastLine) {
-                    const y = startY + (wrappedLines.length - 1) * lineHeight
-                    const textMetrics = ctx.measureText(lastLine)
-                    const cursorX = canvas.width / 2 + textMetrics.width / 2 + 4
-
-                    // Blinking cursor (3 blinks per second)
-                    const shouldShowCursor = Math.floor(elapsedSeconds * 3) % 2 === 0
-                    if (shouldShowCursor) {
-                      ctx.fillStyle = "#FFFF00"
-                      ctx.fillRect(cursorX, y - fontSize * 0.8, 3, fontSize * 0.9)
-                    }
-                  }
-                }
               }
             }
 
@@ -413,21 +388,12 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
               70,
             )
 
-            // Voice and sync indicator (shows whether alignment worked or not)
-            ctx.fillStyle = "#FF69B4"
-            ctx.font = "bold 11px Arial"
-            ctx.textAlign = "right"
-            const syncStatus = videoData.metadata?.alignmentUsed ? "Word-Synced" : "Sentence-Synced"
-            const voiceInfo = `🎤 Rachel 0.85x • ${syncStatus}`
-            ctx.fillText(voiceInfo, canvas.width - 15, 85)
-
             ctx.textAlign = "start"
           }
 
           // Update progress
           const recordingProgress = 50 + (elapsed / durationMs) * 45
           setProgress(recordingProgress)
-          setCurrentStep(`Recording: ${elapsedSeconds.toFixed(1)}s / ${videoData.duration.toFixed(1)}s`)
 
           requestAnimationFrame(animate)
         }
@@ -446,7 +412,6 @@ export function CompleteVideoGenerator({ onVideoGenerated, onError }: CompleteVi
     generateCompleteVideo,
     isGenerating,
     progress,
-    currentStep,
     videoUrl,
     canvasRef,
     audioRef,

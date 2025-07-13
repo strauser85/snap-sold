@@ -46,7 +46,6 @@ export default function VideoGenerator() {
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [currentStep, setCurrentStep] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -56,7 +55,6 @@ export default function VideoGenerator() {
     onVideoGenerated: (url) => {
       setVideoUrl(url)
       setIsLoading(false)
-      setCurrentStep("Video ready for download!")
       setProgress(100)
     },
     onError: (err) => {
@@ -232,7 +230,6 @@ export default function VideoGenerator() {
     setError(null)
     setVideoUrl(null)
     setProgress(0)
-    setCurrentStep("Starting video generation...")
 
     try {
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
@@ -260,7 +257,6 @@ export default function VideoGenerator() {
       }
 
       if (data.success) {
-        setCurrentStep("Generating video with Rachel voice...")
         setProgress(50)
 
         // Use the video generator to create the final video
@@ -289,7 +285,6 @@ export default function VideoGenerator() {
     setVideoUrl(null)
     setError(null)
     setProgress(0)
-    setCurrentStep("")
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -557,16 +552,13 @@ export default function VideoGenerator() {
           </CardContent>
         </Card>
 
-        {/* Progress */}
+        {/* Clean Progress Bar */}
         {isLoading && (
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
-            <CardContent className="p-6 space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">{currentStep}</span>
-                  <span className="text-gray-500">{Math.round(progress)}%</span>
-                </div>
-                <Progress value={progress} className="h-3" />
+            <CardContent className="p-6">
+              <div className="text-center space-y-4">
+                <div className="text-2xl font-bold text-gray-700">{Math.round(progress)}%</div>
+                <Progress value={progress} className="h-4" />
               </div>
             </CardContent>
           </Card>

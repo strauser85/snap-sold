@@ -123,8 +123,8 @@ function numberToWords(num: number): string {
   return num.toString()
 }
 
-// Generate ElevenLabs Rachel voiceover with voice-optimized text cleaning
-async function generateRachelVoiceWithTiming(script: string): Promise<{
+// Generate ElevenLabs Rachel voiceover with precise word-level timestamps
+async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
   success: boolean
   audioUrl?: string
   error?: string
@@ -135,7 +135,7 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
   cleanedScript?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover at 0.85x speed with voice-optimized text...")
+    console.log("🎤 Generating Rachel voiceover with precise word timestamps...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -157,86 +157,13 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       .replace(/\s+/g, " ")
       .trim()
 
-    // Try to get alignment data with bulletproof error handling
-    let alignmentData: any = null
-    let alignmentUsed = false
-
-    try {
-      console.log("🔍 Attempting to get word alignment from ElevenLabs...")
-
-      const alignmentResponse = await fetch(
-        "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM/with-timestamps",
-        {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "xi-api-key": apiKey,
-          },
-          body: JSON.stringify({
-            text: cleanScript,
-            model_id: "eleven_monolingual_v1",
-            voice_settings: {
-              stability: 0.75,
-              similarity_boost: 0.85,
-              style: 0.25,
-              use_speaker_boost: true,
-              speaking_rate: 0.85, // 85% speed for better clarity
-            },
-            output_format: "mp3_44100_128",
-            apply_text_normalization: "auto",
-            with_timestamps: true, // Enable word-level timing
-          }),
-        },
-      )
-
-      if (alignmentResponse.ok) {
-        const alignmentResult = await alignmentResponse.json()
-
-        // Bulletproof validation of alignment response structure
-        if (
-          alignmentResult &&
-          typeof alignmentResult === "object" &&
-          alignmentResult.hasOwnProperty("alignment") &&
-          Array.isArray(alignmentResult.alignment) &&
-          alignmentResult.alignment.length > 0
-        ) {
-          // Additional validation - check if alignment items have required properties
-          const hasValidItems = alignmentResult.alignment.some(
-            (item: any) =>
-              item &&
-              typeof item === "object" &&
-              item.hasOwnProperty("character") &&
-              item.hasOwnProperty("start_time_seconds") &&
-              item.hasOwnProperty("end_time_seconds"),
-          )
-
-          if (hasValidItems) {
-            alignmentData = alignmentResult
-            alignmentUsed = true
-            console.log("✅ Got valid alignment data from ElevenLabs")
-            console.log(`📊 Alignment contains ${alignmentResult.alignment.length} timing points`)
-          } else {
-            console.warn("⚠️ No alignment data from ElevenLabs - alignment items missing required properties")
-          }
-        } else {
-          console.warn("⚠️ No alignment data from ElevenLabs - response structure invalid")
-        }
-      } else {
-        console.warn(`⚠️ No alignment data from ElevenLabs - API returned ${alignmentResponse.status}`)
-      }
-    } catch (alignmentError) {
-      console.warn("⚠️ No alignment data from ElevenLabs - API call failed:", alignmentError)
-      console.log("Continuing with fallback timing estimation...")
-    }
-
-    // Generate the actual audio with voice-optimized script at 0.85x speed
-    console.log("🎵 Generating Rachel audio with voice-optimized text at 0.85x speed...")
+    // Generate audio with word-level timestamps using ElevenLabs
+    console.log("🎵 Generating Rachel audio with word-level timestamps...")
 
     const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
       method: "POST",
       headers: {
-        Accept: "audio/mpeg",
+        Accept: "application/json", // Changed to JSON to get timestamps
         "Content-Type": "application/json",
         "xi-api-key": apiKey,
       },
@@ -251,7 +178,8 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
           speaking_rate: 0.85, // 85% speed for better readability
         },
         output_format: "mp3_44100_128",
-        with_timestamps: true, // Enable word-level timing
+        enable_logging: false,
+        timestamps: "word", // Enable word-level timestamps
       }),
     })
 
@@ -260,24 +188,49 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
     }
 
-    const audioBlob = await response.blob()
-    if (audioBlob.size === 0) {
-      throw new Error("Empty audio response")
+    const result = await response.json()
+
+    // Extract audio and alignment data from response
+    if (!result.audio_base64) {
+      throw new Error("No audio data in ElevenLabs response")
     }
 
-    // Convert to data URL
-    const arrayBuffer = await audioBlob.arrayBuffer()
-    const base64Audio = Buffer.from(arrayBuffer).toString("base64")
-    const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
+    const audioDataUrl = `data:audio/mpeg;base64,${result.audio_base64}`
 
-    // Generate word timings with safe alignment handling (use original script for caption mapping)
-    const wordTimings = generateWordTimings(script, alignmentData, alignmentUsed) // Use original script
+    // Process word-level alignment data
+    let wordTimings: WordTiming[] = []
+    let alignmentUsed = false
+
+    if (result.alignment && Array.isArray(result.alignment.words) && result.alignment.words.length > 0) {
+      console.log("✅ Processing ElevenLabs word-level timestamps")
+
+      // Map original script words to cleaned script alignment
+      const originalWords = script.split(/\s+/).filter((word) => word.length > 0)
+
+      wordTimings = result.alignment.words
+        .map((wordData: any, index: number) => ({
+          word: originalWords[index] || wordData.word || "", // Use original script word
+          startTime: wordData.start_time_seconds || 0,
+          endTime: wordData.end_time_seconds || 0,
+        }))
+        .filter((timing: WordTiming) => timing.word.length > 0)
+
+      alignmentUsed = true
+      console.log(`✅ Processed ${wordTimings.length} word timestamps from ElevenLabs`)
+    } else {
+      console.warn("⚠️ No word timestamps from ElevenLabs - using fallback timing")
+      wordTimings = generateFallbackWordTimings(
+        script.split(/\s+/).filter((w) => w.length > 0),
+        0,
+      )
+    }
+
     const totalDuration =
       wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(cleanScript)
 
-    console.log("✅ Rachel voice generated successfully with voice-optimized text")
+    console.log("✅ Rachel voice generated successfully with word timestamps")
     console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
-    console.log(`🎯 Alignment used: ${alignmentUsed ? "Yes" : "No (fallback timing)"}`)
+    console.log(`🎯 Word-level alignment: ${alignmentUsed ? "Yes" : "No (fallback timing)"}`)
 
     return {
       success: true,
@@ -297,88 +250,6 @@ async function generateRachelVoiceWithTiming(script: string): Promise<{
       originalScript: script,
     }
   }
-}
-
-// Generate word-level timing data with bulletproof alignment handling
-function generateWordTimings(script: string, alignmentData?: any, alignmentUsed?: boolean): WordTiming[] {
-  const words = script.split(/\s+/).filter((word) => word.length > 0)
-  const wordTimings: WordTiming[] = []
-
-  // Bulletproof alignment check
-  if (
-    alignmentUsed &&
-    alignmentData &&
-    typeof alignmentData === "object" &&
-    alignmentData.alignment &&
-    Array.isArray(alignmentData.alignment) &&
-    alignmentData.alignment.length > 0
-  ) {
-    try {
-      console.log("🎯 Using ElevenLabs alignment data for precise timing")
-
-      // Process alignment data with extra safety checks
-      let wordIndex = 0
-      let currentWord = ""
-
-      // Safe forEach with additional validation
-      alignmentData.alignment.forEach((item: any, index: number) => {
-        // Multiple safety checks for each alignment item
-        if (
-          item &&
-          typeof item === "object" &&
-          item.hasOwnProperty("character") &&
-          item.hasOwnProperty("start_time_seconds") &&
-          item.hasOwnProperty("end_time_seconds") &&
-          typeof item.start_time_seconds === "number" &&
-          typeof item.end_time_seconds === "number"
-        ) {
-          const char = String(item.character || "")
-          const startTime = Math.max(0, item.start_time_seconds)
-          const endTime = Math.max(startTime + 0.1, item.end_time_seconds)
-
-          if (char && char.trim()) {
-            currentWord += char
-
-            // Check if we've completed a word (space or end of alignment)
-            if (char === " " || index === alignmentData.alignment.length - 1) {
-              if (currentWord.trim() && wordIndex < words.length) {
-                wordTimings.push({
-                  word: currentWord.trim(),
-                  startTime,
-                  endTime,
-                })
-                wordIndex++
-              }
-              currentWord = ""
-            }
-          }
-        }
-      })
-
-      console.log(`✅ Processed ${wordTimings.length} words from alignment data`)
-
-      // If we didn't get all words from alignment, fall back for remaining
-      if (wordTimings.length < words.length) {
-        console.warn(
-          `⚠️ Alignment only covered ${wordTimings.length}/${words.length} words, using fallback for remaining`,
-        )
-        const remainingWords = words.slice(wordTimings.length)
-        const lastEndTime = wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime : 0
-
-        const fallbackTimings = generateFallbackWordTimings(remainingWords, lastEndTime)
-        wordTimings.push(...fallbackTimings)
-      }
-    } catch (alignmentError) {
-      console.error("❌ Error processing alignment data:", alignmentError)
-      console.warn("⚠️ No alignment data from ElevenLabs - falling back to estimated timing")
-      return generateFallbackWordTimings(words, 0)
-    }
-  } else {
-    console.warn("⚠️ No alignment data from ElevenLabs - using fallback word timing estimation")
-    return generateFallbackWordTimings(words, 0)
-  }
-
-  return wordTimings
 }
 
 // Fallback word timing estimation
@@ -427,7 +298,46 @@ function estimateDuration(script: string): number {
   return Math.max(35, (wordCount / (150 * 0.85)) * 60)
 }
 
-// Generate sentence-level captions as fallback using estimated timing (no artificial delay)
+// Generate word-based captions using precise ElevenLabs word timestamps
+function generatePreciseWordCaptions(
+  wordTimings: WordTiming[],
+  totalDuration: number,
+): Array<{
+  text: string
+  words: WordTiming[]
+  startTime: number
+  endTime: number
+}> {
+  const captions: Array<{ text: string; words: WordTiming[]; startTime: number; endTime: number }> = []
+
+  if (!wordTimings || wordTimings.length === 0) {
+    console.warn("⚠️ No word timings available for caption generation")
+    return captions
+  }
+
+  const wordsPerCaption = 3 // TikTok-style short chunks
+
+  for (let i = 0; i < wordTimings.length; i += wordsPerCaption) {
+    const captionWords = wordTimings.slice(i, i + wordsPerCaption)
+
+    if (captionWords.length > 0) {
+      captions.push({
+        text: captionWords
+          .map((w) => w.word)
+          .join(" ")
+          .toUpperCase(),
+        words: captionWords,
+        startTime: captionWords[0].startTime, // Exact ElevenLabs timing
+        endTime: captionWords[captionWords.length - 1].endTime, // Exact ElevenLabs timing
+      })
+    }
+  }
+
+  console.log(`✅ Generated ${captions.length} precise word-based captions`)
+  return captions
+}
+
+// Generate sentence-level captions as fallback using estimated timing
 function generateSentenceCaptions(
   originalScript: string,
   totalDuration: number,
@@ -437,7 +347,7 @@ function generateSentenceCaptions(
   startTime: number
   endTime: number
 }> {
-  console.log("📝 Generating sentence-level captions synced to estimated timing")
+  console.log("📝 Generating sentence-level captions with estimated timing")
 
   const sentences = originalScript
     .replace(/[^\w\s.,!?'-]/g, " ")
@@ -470,52 +380,13 @@ function generateSentenceCaptions(
     })
   })
 
-  console.log(`✅ Generated ${captions.length} sentence-level captions synced to estimated timing`)
-  return captions
-}
-
-// Generate word-based captions using actual ElevenLabs timing (no artificial delay)
-function generateWordBasedCaptions(
-  wordTimings: WordTiming[],
-  totalDuration: number,
-): Array<{
-  text: string
-  words: WordTiming[]
-  startTime: number
-  endTime: number
-}> {
-  const captions: Array<{ text: string; words: WordTiming[]; startTime: number; endTime: number }> = []
-
-  if (!wordTimings || wordTimings.length === 0) {
-    console.warn("⚠️ No word timings available for caption generation")
-    return captions
-  }
-
-  const wordsPerCaption = 3 // Smaller chunks for TikTok-style readability
-
-  for (let i = 0; i < wordTimings.length; i += wordsPerCaption) {
-    const captionWords = wordTimings.slice(i, i + wordsPerCaption)
-
-    if (captionWords.length > 0) {
-      captions.push({
-        text: captionWords
-          .map((w) => w.word)
-          .join(" ")
-          .toUpperCase(),
-        words: captionWords,
-        startTime: captionWords[0].startTime, // Use actual ElevenLabs timing
-        endTime: captionWords[captionWords.length - 1].endTime, // Use actual ElevenLabs timing
-      })
-    }
-  }
-
-  console.log(`✅ Generated ${captions.length} word-based captions synced to ElevenLabs timing`)
+  console.log(`✅ Generated ${captions.length} sentence-level captions with estimated timing`)
   return captions
 }
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 COMPLETE VIDEO GENERATION WITH SAFE ALIGNMENT")
+    console.log("🎬 COMPLETE VIDEO GENERATION WITH PRECISE WORD TIMESTAMPS")
 
     const data: VideoRequest = await request.json()
 
@@ -528,8 +399,8 @@ export async function POST(request: NextRequest) {
     console.log(`🖼️ Images: ${data.imageUrls.length}`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
-    // Step 1: Generate Rachel voice with safe alignment handling
-    const audioResult = await generateRachelVoiceWithTiming(data.script)
+    // Step 1: Generate Rachel voice with precise word timestamps
+    const audioResult = await generateRachelVoiceWithWordTimestamps(data.script)
     if (!audioResult.success) {
       return NextResponse.json({ error: `Voice generation failed: ${audioResult.error}` }, { status: 500 })
     }
@@ -538,22 +409,20 @@ export async function POST(request: NextRequest) {
     const totalDuration = audioResult.duration || estimateDuration(data.script)
     const timePerImage = Math.max(3, Math.floor(totalDuration / data.imageUrls.length))
 
-    // Step 3: Generate captions with fallback handling (use original script for captions)
+    // Step 3: Generate captions with precise timing
     let captions: Array<{ text: string; words: WordTiming[]; startTime: number; endTime: number }>
 
-    if (audioResult.wordTimings && audioResult.wordTimings.length > 0) {
-      console.log("✅ Using word-based captions from original script")
-      captions = generateWordBasedCaptions(audioResult.wordTimings, totalDuration)
+    if (audioResult.wordTimings && audioResult.wordTimings.length > 0 && audioResult.alignmentUsed) {
+      console.log("✅ Using precise word-based captions from ElevenLabs timestamps")
+      captions = generatePreciseWordCaptions(audioResult.wordTimings, totalDuration)
     } else {
-      console.log("⚠️ Falling back to sentence-level captions from original script")
-      captions = generateSentenceCaptions(data.script, totalDuration) // Use original script
+      console.log("⚠️ Falling back to sentence-level captions with estimated timing")
+      captions = generateSentenceCaptions(data.script, totalDuration)
     }
 
     console.log(`📊 Video: ${totalDuration.toFixed(1)}s duration, ${timePerImage}s per image`)
-    console.log(
-      `🎤 Rachel voice: 0.85x speed, voice-optimized text, alignment: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
-    )
-    console.log(`📝 Captions: ${captions.length} chunks synced to actual audio timing`)
+    console.log(`🎤 Rachel voice: 0.85x speed, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`)
+    console.log(`📝 Captions: ${captions.length} chunks with precise timing`)
 
     // Return everything needed for client-side video generation
     return NextResponse.json({
@@ -581,12 +450,12 @@ export async function POST(request: NextRequest) {
         natural: true,
         wordSynced: audioResult.alignmentUsed || false,
         alignmentUsed: audioResult.alignmentUsed || false,
-        description: `Rachel voice at 0.85x speed${audioResult.alignmentUsed ? " with word alignment" : " with estimated timing"}`,
+        description: `Rachel voice at 0.85x speed${audioResult.alignmentUsed ? " with precise word timestamps" : " with estimated timing"}`,
       },
       metadata: {
         alignmentUsed: audioResult.alignmentUsed || false,
-        captionDelay: 500, // ms
-        captionType: audioResult.wordTimings ? "word-based" : "sentence-based",
+        captionDelay: 0, // No artificial delay - using precise timestamps
+        captionType: audioResult.alignmentUsed ? "word-precise" : "sentence-estimated",
       },
     })
   } catch (error) {
