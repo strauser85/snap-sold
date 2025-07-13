@@ -51,15 +51,24 @@ export async function POST(request: NextRequest) {
     const blob = await put(filename, buffer, {
       access: "public",
       contentType: file.type,
+      addRandomSuffix: false, // Prevent duplicate suffixes
     })
 
     console.log(`Upload successful: ${blob.url}`)
 
-    return NextResponse.json({
+    // Return response with proper CORS headers
+    const response = NextResponse.json({
       success: true,
       url: blob.url,
       filename: filename,
     })
+
+    // Add CORS headers to prevent range request issues
+    response.headers.set("Access-Control-Allow-Origin", "*")
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type")
+
+    return response
   } catch (error) {
     console.error("Upload error:", error)
     return NextResponse.json(
@@ -70,4 +79,16 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     )
   }
+}
+
+// Add OPTIONS handler for CORS preflight
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  })
 }
