@@ -9,7 +9,6 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Loader2,
-  Play,
   Download,
   AlertCircle,
   CheckCircle,
@@ -17,25 +16,12 @@ import {
   ImageIcon,
   Wand2,
   FileText,
-  Volume2,
   Upload,
   Sparkles,
   RefreshCw,
-  Settings,
-  Key,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { FinalVideoGenerator } from "@/components/final-video-generator"
-
-interface GenerationProgress {
-  step: string
-  progress: number
-}
-
-interface VideoResult {
-  videoUrl: string
-  metadata: any
-}
+import { CompleteVideoGenerator } from "@/components/complete-video-generator"
 
 interface UploadedImage {
   file: File
@@ -59,18 +45,25 @@ export default function VideoGenerator() {
 
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
-  const [progress, setProgress] = useState<GenerationProgress | null>(null)
-  const [result, setResult] = useState<VideoResult | null>(null)
+  const [progress, setProgress] = useState(0)
+  const [currentStep, setCurrentStep] = useState("")
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [canRetry, setCanRetry] = useState(false)
-  const [suggestions, setSuggestions] = useState<string[]>([])
-
-  const [videoConfig, setVideoConfig] = useState<any>(null)
-  const [propertyData, setPropertyData] = useState<any>(null)
-  const [showGenerator, setShowGenerator] = useState(false)
-  const [debugInfo, setDebugInfo] = useState<any>(null)
 
   const MAX_IMAGES = 15
+
+  const videoGenerator = CompleteVideoGenerator({
+    onVideoGenerated: (url) => {
+      setVideoUrl(url)
+      setIsLoading(false)
+      setCurrentStep("Video ready for download!")
+      setProgress(100)
+    },
+    onError: (err) => {
+      setError(err)
+      setIsLoading(false)
+    },
+  })
 
   // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
@@ -223,7 +216,7 @@ export default function VideoGenerator() {
     }
   }
 
-  const handleGenerateFinalVideo = async () => {
+  const handleGenerateVideo = async () => {
     if (!address || !price || !bedrooms || !bathrooms || !sqft || !generatedScript || uploadedImages.length === 0) {
       setError("Please fill in all details, generate a script, and upload at least one image.")
       return
@@ -237,17 +230,15 @@ export default function VideoGenerator() {
 
     setIsLoading(true)
     setError(null)
-    setResult(null)
-    setProgress(null)
-    setCanRetry(false)
-    setSuggestions([])
+    setVideoUrl(null)
+    setProgress(0)
+    setCurrentStep("Starting video generation...")
 
     try {
-      setProgress({ step: "Generating Rachel voiceover and TikTok captions...", progress: 25 })
-
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
-      const response = await fetch("/api/generate-final-video", {
+      // Call the complete video generation API
+      const response = await fetch("/api/generate-complete-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -265,34 +256,23 @@ export default function VideoGenerator() {
       const data = await response.json()
 
       if (!response.ok) {
-        setCanRetry(data.canRetry || false)
-        setDebugInfo(data.debugInfo)
-        setSuggestions(data.suggestions || [])
         throw new Error(data.details || data.error || `Server error: ${response.status}`)
       }
 
-      if (data.success && data.videoConfig) {
-        setVideoConfig(data.videoConfig)
-        setPropertyData(data.property)
-        setDebugInfo(data.debugInfo)
-        setShowGenerator(true)
-        setProgress({ step: "Final video generator ready!", progress: 100 })
+      if (data.success) {
+        setCurrentStep("Generating video with Rachel voice...")
+        setProgress(50)
+
+        // Use the video generator to create the final video
+        await videoGenerator.generateCompleteVideo(data)
       } else {
-        throw new Error("Failed to prepare final video")
+        throw new Error("Failed to prepare video data")
       }
     } catch (err) {
       console.error("Generation error:", err)
-      setError(err instanceof Error ? err.message : "Final video generation failed")
-    } finally {
+      setError(err instanceof Error ? err.message : "Video generation failed")
       setIsLoading(false)
     }
-  }
-
-  const retryGeneration = () => {
-    setError(null)
-    setCanRetry(false)
-    setSuggestions([])
-    handleGenerateFinalVideo()
   }
 
   const resetForm = () => {
@@ -306,15 +286,10 @@ export default function VideoGenerator() {
     setScriptMethod("")
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     setUploadedImages([])
-    setResult(null)
+    setVideoUrl(null)
     setError(null)
-    setProgress(null)
-    setVideoConfig(null)
-    setPropertyData(null)
-    setShowGenerator(false)
-    setDebugInfo(null)
-    setCanRetry(false)
-    setSuggestions([])
+    setProgress(0)
+    setCurrentStep("")
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -324,6 +299,10 @@ export default function VideoGenerator() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl space-y-8">
+        {/* Hidden canvas and audio for video generation */}
+        <canvas ref={videoGenerator.canvasRef} className="hidden" />
+        <audio ref={videoGenerator.audioRef} className="hidden" />
+
         {/* Header */}
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-2">
@@ -336,30 +315,7 @@ export default function VideoGenerator() {
           <p className="text-lg text-gray-600 leading-relaxed">
             Create viral TikTok videos with Rachel's AI voice and dynamic captions
           </p>
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full text-sm font-medium text-purple-700">
-            <Volume2 className="h-4 w-4" />
-            One-Click Video Generation
-          </div>
         </div>
-
-        {/* API Key Status Alert */}
-        <Alert>
-          <Key className="h-4 w-4" />
-          <AlertDescription>
-            <div className="space-y-2">
-              <p className="font-medium">ElevenLabs API Configuration</p>
-              <p className="text-sm">
-                To use Rachel's premium voice, please ensure your ELEVENLABS_API_KEY is configured in the environment
-                variables. The app will use a fallback voice if ElevenLabs is unavailable.
-              </p>
-              <div className="text-xs text-gray-600 space-y-1">
-                <p>• ElevenLabs API keys are typically 32+ characters long</p>
-                <p>• Keys should be added to environment variables as ELEVENLABS_API_KEY</p>
-                <p>• Ensure your account has sufficient quota for text-to-speech generation</p>
-              </div>
-            </div>
-          </AlertDescription>
-        </Alert>
 
         {/* Form */}
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
@@ -571,8 +527,9 @@ export default function VideoGenerator() {
               />
             </div>
 
+            {/* SINGLE GENERATE BUTTON */}
             <Button
-              onClick={handleGenerateFinalVideo}
+              onClick={handleGenerateVideo}
               disabled={
                 isLoading ||
                 !address ||
@@ -585,17 +542,17 @@ export default function VideoGenerator() {
                 uploadingCount > 0 ||
                 uploadedCount === 0
               }
-              className="w-full h-14 text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
+              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-3 h-5 w-5 animate-spin" />
-                  Preparing Final Video...
+                  <Loader2 className="mr-3 h-6 w-6 animate-spin" />
+                  Generating Final Video...
                 </>
               ) : (
                 <>
-                  <Sparkles className="mr-3 h-5 w-5" />
-                  Generate Final Video ({uploadedCount} images)
+                  <Sparkles className="mr-3 h-6 w-6" />
+                  Generate Final Video
                 </>
               )}
             </Button>
@@ -603,127 +560,72 @@ export default function VideoGenerator() {
         </Card>
 
         {/* Progress */}
-        {progress && (
+        {isLoading && (
           <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
             <CardContent className="p-6 space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">{progress.step}</span>
-                  <span className="text-gray-500">{progress.progress}%</span>
+                  <span className="text-gray-600">{currentStep}</span>
+                  <span className="text-gray-500">{Math.round(progress)}%</span>
                 </div>
-                <Progress value={progress.progress} className="h-3" />
+                <Progress value={progress} className="h-3" />
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Error with Retry and Suggestions */}
+        {/* Error */}
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
               <div className="space-y-3">
                 <p>{error}</p>
-
-                {suggestions.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="font-medium text-sm">Suggestions:</p>
-                    <ul className="text-xs space-y-1">
-                      {suggestions.map((suggestion, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <span className="text-yellow-600">•</span>
-                          <span>{suggestion}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {canRetry && (
-                  <Button onClick={retryGeneration} variant="outline" size="sm" className="bg-white">
-                    <RefreshCw className="mr-2 h-3 w-3" />
-                    Retry Generation
-                  </Button>
-                )}
-
-                {debugInfo && (
-                  <details className="text-xs">
-                    <summary className="cursor-pointer flex items-center gap-2">
-                      <Settings className="h-3 w-3" />
-                      Show Technical Details
-                    </summary>
-                    <pre className="mt-2 p-2 bg-gray-100 rounded text-black overflow-auto max-h-40">
-                      {JSON.stringify(debugInfo, null, 2)}
-                    </pre>
-                  </details>
-                )}
+                <Button onClick={() => setError(null)} variant="outline" size="sm" className="bg-white">
+                  <RefreshCw className="mr-2 h-3 w-3" />
+                  Try Again
+                </Button>
               </div>
             </AlertDescription>
           </Alert>
         )}
 
-        {/* Video Preview */}
-        <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-          <CardContent className="p-6">
-            <div className="aspect-[9/16] bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg flex items-center justify-center min-h-[400px] max-w-sm mx-auto">
-              {result ? (
-                <div className="text-center space-y-4 w-full">
-                  <div className="bg-black rounded-lg aspect-[9/16] flex items-center justify-center relative overflow-hidden">
-                    <video src={result.videoUrl} controls className="w-full h-full object-cover" preload="metadata" />
-                    <div className="absolute bottom-4 left-4 right-4 text-white bg-black bg-opacity-50 p-2 rounded">
-                      <p className="text-sm font-medium">Final TikTok Video</p>
-                      <p className="text-xs opacity-80 flex items-center gap-1">
-                        <Volume2 className="h-3 w-3" />
-                        {result.metadata?.voiceUsed || "AI Voice"} + Captions
-                      </p>
-                    </div>
+        {/* Download Section */}
+        {videoUrl && (
+          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+            <CardContent className="p-6">
+              <div className="text-center space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                  <div className="flex items-center gap-2 text-green-700 mb-3">
+                    <CheckCircle className="h-6 w-6" />
+                    <span className="font-bold text-lg">Video Generated Successfully!</span>
                   </div>
+                  <div className="text-sm text-green-600 space-y-1">
+                    <p>✅ Rachel's AI voice embedded</p>
+                    <p>✅ TikTok-style captions synced</p>
+                    <p>✅ All {uploadedCount} images included</p>
+                    <p>✅ Ready for social media</p>
+                  </div>
+                </div>
 
-                  <div className="flex gap-2">
-                    <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
-                      Generate Another
-                    </Button>
-                    <Button
-                      asChild
-                      className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
-                    >
-                      <a href={result.videoUrl} download="final-tiktok-video.webm">
-                        <Download className="mr-2 h-4 w-4" />
-                        Download
-                      </a>
-                    </Button>
-                  </div>
+                <div className="flex gap-3">
+                  <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
+                    Generate Another
+                  </Button>
+                  <Button
+                    asChild
+                    className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
+                  >
+                    <a href={videoUrl} download="tiktok-property-video.webm">
+                      <Download className="mr-2 h-5 w-5" />
+                      Download MP4
+                    </a>
+                  </Button>
                 </div>
-              ) : showGenerator && videoConfig && propertyData ? (
-                <FinalVideoGenerator
-                  config={videoConfig}
-                  property={propertyData}
-                  onVideoGenerated={(videoUrl) => {
-                    setResult({
-                      videoUrl,
-                      metadata: { type: "final-video", voiceUsed: videoConfig.metadata?.voiceUsed },
-                    })
-                    setShowGenerator(false)
-                  }}
-                  onError={(error) => {
-                    setError(error)
-                    setShowGenerator(false)
-                  }}
-                />
-              ) : (
-                <div className="text-center space-y-3">
-                  <div className="w-20 h-20 bg-gradient-to-br from-purple-200 to-pink-200 rounded-full flex items-center justify-center mx-auto">
-                    <Play className="h-8 w-8 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600 font-medium">Your final video will appear here</p>
-                    <p className="text-xs text-gray-400 mt-1">Rachel voice + TikTok captions + All images</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )
