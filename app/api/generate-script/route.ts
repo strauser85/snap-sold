@@ -10,6 +10,34 @@ interface PropertyData {
   imageCount?: number
 }
 
+// Comprehensive script sanitization for JSON and TTS safety
+function sanitizeScript(text: string): string {
+  console.log("🧹 Sanitizing script for JSON/TTS safety...")
+  console.log("📝 Original text length:", text.length)
+  console.log("🔍 Original sample:", text.substring(0, 100))
+
+  const sanitized = text
+    // Remove ALL non-ASCII characters (emojis, symbols, etc.)
+    .replace(/[^\x00-\x7F]/g, "")
+    // Replace smart quotes with normal quotes
+    .replace(/[""'']/g, '"')
+    // Replace em-dashes and en-dashes with hyphens
+    .replace(/[—–]/g, "-")
+    // Replace ellipsis with three periods
+    .replace(/…/g, "...")
+    // Remove any remaining problematic characters
+    .replace(/[^\x20-\x7E]/g, " ")
+    // Clean up multiple spaces
+    .replace(/\s+/g, " ")
+    // Trim whitespace
+    .trim()
+
+  console.log("✅ Sanitized text length:", sanitized.length)
+  console.log("🔍 Sanitized sample:", sanitized.substring(0, 100))
+
+  return sanitized
+}
+
 // Comprehensive script sanitization filter
 function sanitizeGeneratedScript(script: string): string {
   console.log("🧹 Applying final script sanitization filter...")
@@ -138,8 +166,8 @@ const generateFallbackScript = (data: PropertyData): string => {
 
   script += `${ending}`
 
-  // Apply sanitization filter to fallback script too
-  return sanitizeGeneratedScript(script)
+  // Apply sanitization filter to fallback script
+  return sanitizeScript(script)
 }
 
 // OpenAI API function with updated prompt
@@ -159,29 +187,28 @@ async function generateOpenAIScript(propertyData: PropertyData): Promise<string>
           role: "system",
           content: `You are a top real estate marketing expert who creates viral TikTok scripts. Create engaging, persuasive voiceover scripts for property videos.
 
-CRITICAL REQUIREMENTS - FOLLOW EXACTLY:
-1. Use ONLY plain English text - NO emojis, symbols, or special characters
-2. Use ONLY standard ASCII punctuation: periods, commas, exclamation marks, question marks
-3. NO Unicode symbols, emojis, or special formatting characters
-4. NO hashtags, @ mentions, or social media symbols
-5. NO bullet points, arrows, or decorative characters
-6. Use words instead of symbols (write "dollars" not "$", "and" not "&")
+CRITICAL CHARACTER RESTRICTIONS - FOLLOW EXACTLY:
+- Do not include emojis, special characters, smart quotes, or any non-ASCII symbols
+- Use ONLY standard ASCII characters (letters, numbers, basic punctuation)
+- Use ONLY these punctuation marks: . , ! ? ' " - ( )
+- NO Unicode symbols, emojis, or decorative characters whatsoever
+- NO smart quotes, em-dashes, or special formatting
+- Write "dollars" instead of "$", "and" instead of "&"
+- Use plain English words only
 
 SCRIPT REQUIREMENTS:
-- Hook viewers in the first 3 seconds with a compelling question or statement
-- Use urgency and scarcity tactics ("This won't last long!")
+- Hook viewers in the first 3 seconds with compelling statements
+- Use urgency and scarcity tactics
 - Highlight key selling points and lifestyle benefits
 - Include emotional triggers and investment potential
-- Reference multiple property features since we have ${imageCount} images to showcase
-- IMPORTANTLY: Incorporate any custom property description/features provided by the user naturally into the script
-- End with a strong call-to-action
-- Are 45-60 seconds when spoken (about 150-200 words for ${imageCount} images)
-- Use casual, energetic TikTok language with strategic pauses
-- Include relevant power words and create anticipation for each room/feature reveal
+- Reference property features for ${imageCount} images
+- Incorporate custom property descriptions naturally
+- End with strong call-to-action
+- 45-60 seconds when spoken (150-200 words)
+- Casual, energetic TikTok language
+- Create anticipation for room reveals
 
-The script should feel authentic and exciting, not salesy. Focus on lifestyle transformation and investment opportunity. If custom property details are provided, weave them seamlessly into the narrative to highlight what makes this property unique.
-
-REMEMBER: Use ONLY plain text with standard punctuation. NO emojis or special characters whatsoever.`,
+REMEMBER: Use ONLY plain ASCII text. Absolutely NO emojis, symbols, or special characters.`,
         },
         {
           role: "user",
@@ -219,8 +246,11 @@ Make it compelling for potential buyers and investors with hooks, benefits, urge
   const data = await response.json()
   const rawScript = data.choices[0].message.content.trim()
 
-  // Apply sanitization filter to AI-generated script
-  return sanitizeGeneratedScript(rawScript)
+  // Apply comprehensive sanitization
+  const sanitizedScript = sanitizeScript(rawScript)
+
+  console.log("🧹 Script sanitized for TTS safety")
+  return sanitizedScript
 }
 
 export async function POST(request: NextRequest) {
@@ -268,7 +298,7 @@ export async function POST(request: NextRequest) {
     console.error("Script generation error:", error)
 
     // Last resort - basic template (emoji-free)
-    const basicScript = sanitizeGeneratedScript(
+    const basicScript = sanitizeScript(
       `Welcome to this amazing property! This stunning home features multiple bedrooms and bathrooms with incredible living space. Don't miss this opportunity! Contact me today!`,
     )
 

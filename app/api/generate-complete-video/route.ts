@@ -17,93 +17,59 @@ interface WordTiming {
   endTime: number
 }
 
+// Comprehensive script sanitization for JSON and TTS safety
+function sanitizeScript(text: string): string {
+  console.log("🧹 Sanitizing script for ElevenLabs JSON payload...")
+  console.log("📝 Original text length:", text.length)
+  console.log("🔍 Original sample:", text.substring(0, 100))
+
+  const sanitized = text
+    // Remove ALL non-ASCII characters (emojis, symbols, etc.)
+    .replace(/[^\x00-\x7F]/g, "")
+    // Replace smart quotes with normal quotes
+    .replace(/[""'']/g, '"')
+    // Replace em-dashes and en-dashes with hyphens
+    .replace(/[—–]/g, "-")
+    // Replace ellipsis with three periods
+    .replace(/…/g, "...")
+    // Remove any remaining problematic characters
+    .replace(/[^\x20-\x7E]/g, " ")
+    // Clean up multiple spaces
+    .replace(/\s+/g, " ")
+    // Trim whitespace
+    .trim()
+
+  console.log("✅ Sanitized for ElevenLabs - length:", sanitized.length)
+  console.log("🔍 Sanitized sample:", sanitized.substring(0, 100))
+
+  return sanitized
+}
+
 // Comprehensive script sanitization for ElevenLabs API
 function sanitizeScriptForElevenLabs(text: string): string {
-  console.log("🧹 Starting script sanitization for ElevenLabs...")
-  console.log("📝 Original script length:", text.length)
+  console.log("🧹 Starting comprehensive script sanitization for ElevenLabs...")
 
-  let sanitized = text
+  // FIRST: Apply basic ASCII sanitization
+  let sanitized = sanitizeScript(text)
 
-  // Step 1: Remove all emojis and Unicode symbols
-  // This regex removes all emoji characters, symbols, and pictographs
-  sanitized = sanitized.replace(/[\u{1F600}-\u{1F64F}]/gu, "") // Emoticons
-  sanitized = sanitized.replace(/[\u{1F300}-\u{1F5FF}]/gu, "") // Misc Symbols and Pictographs
-  sanitized = sanitized.replace(/[\u{1F680}-\u{1F6FF}]/gu, "") // Transport and Map
-  sanitized = sanitized.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, "") // Regional indicator symbols
-  sanitized = sanitized.replace(/[\u{2600}-\u{26FF}]/gu, "") // Misc symbols
-  sanitized = sanitized.replace(/[\u{2700}-\u{27BF}]/gu, "") // Dingbats
-  sanitized = sanitized.replace(/[\u{1F900}-\u{1F9FF}]/gu, "") // Supplemental Symbols and Pictographs
-  sanitized = sanitized.replace(/[\u{1FA70}-\u{1FAFF}]/gu, "") // Symbols and Pictographs Extended-A
+  console.log("📝 After basic sanitization:", sanitized.length)
 
-  // Step 2: Replace smart quotes and punctuation with ASCII equivalents
-  sanitized = sanitized.replace(/[""]/g, '"') // Smart double quotes
-  sanitized = sanitized.replace(/['']/g, "'") // Smart single quotes
-  sanitized = sanitized.replace(/[–—]/g, "-") // Em dash, en dash
-  sanitized = sanitized.replace(/[…]/g, "...") // Ellipsis
-  sanitized = sanitized.replace(/[«»]/g, '"') // Guillemets
-  sanitized = sanitized.replace(/[‚„]/g, ",") // Various comma-like characters
+  // THEN: Apply additional ElevenLabs-specific cleaning
+  sanitized = sanitized
+    .replace(/\$(\d+)/g, "$1 dollars")
+    .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
+    .replace(/(\d+)\s*bed/gi, "$1 bedroom")
+    .replace(/(\d+)\s*bath/gi, "$1 bathroom")
+    .trim()
 
-  // Step 3: Remove or replace special characters that could break TTS
-  sanitized = sanitized.replace(/[®©™]/g, "") // Trademark symbols
-  sanitized = sanitized.replace(/[°]/g, " degrees ") // Degree symbol
-  sanitized = sanitized.replace(/[±]/g, " plus or minus ") // Plus-minus
-  sanitized = sanitized.replace(/[×]/g, " times ") // Multiplication
-  sanitized = sanitized.replace(/[÷]/g, " divided by ") // Division
-  sanitized = sanitized.replace(/[¼]/g, " one quarter ") // Fractions
-  sanitized = sanitized.replace(/[½]/g, " one half ")
-  sanitized = sanitized.replace(/[¾]/g, " three quarters ")
-
-  // Step 4: Handle currency and numbers properly
-  sanitized = sanitized.replace(/\$/g, " dollars ") // Dollar signs
-  sanitized = sanitized.replace(/[¢]/g, " cents ") // Cents
-  sanitized = sanitized.replace(/[£]/g, " pounds ") // British pounds
-  sanitized = sanitized.replace(/[€]/g, " euros ") // Euros
-  sanitized = sanitized.replace(/[¥]/g, " yen ") // Yen
-
-  // Step 5: Remove remaining non-ASCII characters
-  // Keep only basic ASCII characters (32-126) plus common accented letters
-  sanitized = sanitized.replace(/[^\x20-\x7E\u00C0-\u00FF]/g, " ")
-
-  // Step 6: Clean up real estate abbreviations for better pronunciation
-  sanitized = sanitized.replace(/\bsq\.?\s*ft\.?\b/gi, "square feet")
-  sanitized = sanitized.replace(/\bsqft\b/gi, "square feet")
-  sanitized = sanitized.replace(/\bbr\.?\b/gi, "bedrooms")
-  sanitized = sanitized.replace(/\bba\.?\b/gi, "bathrooms")
-  sanitized = sanitized.replace(/\bbeds?\b/gi, "bedrooms")
-  sanitized = sanitized.replace(/\bbaths?\b/gi, "bathrooms")
-  sanitized = sanitized.replace(/\bst\.?\b/gi, "street")
-  sanitized = sanitized.replace(/\bave\.?\b/gi, "avenue")
-  sanitized = sanitized.replace(/\brd\.?\b/gi, "road")
-  sanitized = sanitized.replace(/\bdr\.?\b/gi, "drive")
-  sanitized = sanitized.replace(/\bblvd\.?\b/gi, "boulevard")
-
-  // Step 7: Handle numbers and measurements
-  sanitized = sanitized.replace(/(\d+),(\d+)/g, "$1$2") // Remove commas from numbers
-  sanitized = sanitized.replace(/\b(\d+)k\b/gi, "$1 thousand") // 250k -> 250 thousand
-  sanitized = sanitized.replace(/\b(\d+)m\b/gi, "$1 million") // 2m -> 2 million
-
-  // Step 8: Clean up punctuation and spacing
-  sanitized = sanitized.replace(/[^\w\s.,!?'-]/g, " ") // Remove remaining special chars
-  sanitized = sanitized.replace(/\s+/g, " ") // Normalize whitespace
-  sanitized = sanitized.replace(/\s+([.,!?])/g, "$1") // Fix spacing before punctuation
-  sanitized = sanitized.replace(/([.,!?])\s*([.,!?])/g, "$1 $2") // Fix multiple punctuation
-
-  // Step 9: Ensure proper sentence structure
-  sanitized = sanitized.replace(/\.([A-Za-z])/g, ". $1") // Space after periods
-  sanitized = sanitized.replace(/!([A-Za-z])/g, "! $1") // Space after exclamations
-  sanitized = sanitized.replace(/\?([A-Za-z])/g, "? $1") // Space after questions
-
-  // Step 10: Final cleanup
-  sanitized = sanitized.trim()
-
-  // Ensure the text ends with proper punctuation for natural speech
+  // Ensure proper sentence ending
   if (sanitized && !/[.!?]$/.test(sanitized)) {
     sanitized += "."
   }
 
-  console.log("✅ Script sanitization complete")
-  console.log("📝 Sanitized script length:", sanitized.length)
-  console.log("🔍 Sample sanitized text:", sanitized.substring(0, 100) + "...")
+  console.log("✅ Final ElevenLabs sanitization complete")
+  console.log("📝 Final length:", sanitized.length)
+  console.log("🔍 Final sample:", sanitized.substring(0, 100) + "...")
 
   return sanitized
 }
@@ -185,15 +151,32 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
 
     // Step 5: Make API request with properly formatted JSON
     console.log("📡 Making ElevenLabs API request with JSON.stringify()...")
+    console.log("🔍 RAW PAYLOAD BEFORE JSON.stringify():")
+    console.log("   - text length:", requestPayload.text.length)
+    console.log("   - text sample:", requestPayload.text.substring(0, 200))
+    console.log("   - model_id:", requestPayload.model_id)
+    console.log("   - voice_settings:", JSON.stringify(requestPayload.voice_settings))
 
-    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+    // Test JSON.stringify() before sending
+    let jsonPayload: string
+    try {
+      jsonPayload = JSON.stringify(requestPayload)
+      console.log("✅ JSON.stringify() successful - payload length:", jsonPayload.length)
+      console.log("🔍 JSON payload sample:", jsonPayload.substring(0, 200))
+    } catch (jsonError) {
+      console.error("❌ JSON.stringify() FAILED:", jsonError)
+      console.error("🔍 Problematic payload:", requestPayload)
+      throw new Error(`JSON serialization failed: ${jsonError}`)
+    }
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM`, {
       method: "POST",
       headers: {
-        Accept: "application/json", // Request JSON response for timestamps
+        Accept: "application/json",
         "Content-Type": "application/json",
         "xi-api-key": apiKey,
       },
-      body: JSON.stringify(requestPayload), // Properly stringify the payload
+      body: jsonPayload, // Use pre-tested JSON payload
     })
 
     console.log(`📡 ElevenLabs API response: ${response.status} ${response.statusText}`)
