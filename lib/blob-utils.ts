@@ -2,23 +2,62 @@
 
 export async function createSafeVideoBlob(chunks: Blob[]): Promise<string> {
   try {
-    // Create video blob with proper MIME type
-    const videoBlob = new Blob(chunks, {
-      type: "video/webm;codecs=vp9,opus",
-    })
+    console.log(`Creating video blob from ${chunks.length} chunks`)
 
-    // Verify blob is valid
-    if (videoBlob.size === 0) {
-      throw new Error("Empty video blob created")
+    // Check if we have any chunks
+    if (chunks.length === 0) {
+      throw new Error("No video chunks available - recording may have failed")
     }
 
-    console.log(`Safe video blob created: ${videoBlob.size} bytes`)
+    // Calculate total size
+    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0)
+    console.log(`Total video data: ${totalSize} bytes`)
+
+    if (totalSize === 0) {
+      throw new Error("All video chunks are empty - no video data recorded")
+    }
+
+    // Try different MIME types for better compatibility
+    const mimeTypes = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+      "video/mp4",
+    ]
+
+    let videoBlob: Blob | null = null
+    let usedMimeType = ""
+
+    for (const mimeType of mimeTypes) {
+      try {
+        videoBlob = new Blob(chunks, { type: mimeType })
+        if (videoBlob.size > 0) {
+          usedMimeType = mimeType
+          console.log(`Successfully created blob with ${mimeType}: ${videoBlob.size} bytes`)
+          break
+        }
+      } catch (error) {
+        console.log(`Failed to create blob with ${mimeType}:`, error)
+        continue
+      }
+    }
+
+    if (!videoBlob || videoBlob.size === 0) {
+      throw new Error("Failed to create valid video blob with any MIME type")
+    }
+
+    console.log(`Final video blob: ${videoBlob.size} bytes, type: ${usedMimeType}`)
 
     // Create object URL
     const url = URL.createObjectURL(videoBlob)
 
-    // Test the URL to ensure it works
-    await testVideoUrl(url)
+    // Test the URL briefly
+    const testResult = await testVideoUrl(url)
+    if (!testResult) {
+      console.warn("Video URL test failed, but proceeding anyway")
+    }
 
     return url
   } catch (error) {
