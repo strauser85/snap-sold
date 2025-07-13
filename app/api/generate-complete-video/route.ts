@@ -17,113 +17,111 @@ interface WordTiming {
   endTime: number
 }
 
-// Comprehensive text cleaning for natural TTS speech
-function cleanTextForVoice(text: string): string {
-  let cleaned = text
+// Comprehensive script sanitization for ElevenLabs API
+function sanitizeScriptForElevenLabs(text: string): string {
+  console.log("🧹 Starting script sanitization for ElevenLabs...")
+  console.log("📝 Original script length:", text.length)
 
-  // Step 1: Preserve important patterns we don't want to change
-  const preservePatterns: { [key: string]: string } = {}
-  let preserveCounter = 0
+  let sanitized = text
 
-  // Preserve prices (e.g., $250,000, $1.5M, $2.3 million)
-  cleaned = cleaned.replace(/\$[\d,]+(?:\.[\d]+)?[KMB]?(?:\s*(?:million|thousand|billion))?/gi, (match) => {
-    const placeholder = `__PRESERVE_PRICE_${preserveCounter++}__`
-    preservePatterns[placeholder] = match
-    return placeholder
-  })
+  // Step 1: Remove all emojis and Unicode symbols
+  // This regex removes all emoji characters, symbols, and pictographs
+  sanitized = sanitized.replace(/[\u{1F600}-\u{1F64F}]/gu, "") // Emoticons
+  sanitized = sanitized.replace(/[\u{1F300}-\u{1F5FF}]/gu, "") // Misc Symbols and Pictographs
+  sanitized = sanitized.replace(/[\u{1F680}-\u{1F6FF}]/gu, "") // Transport and Map
+  sanitized = sanitized.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, "") // Regional indicator symbols
+  sanitized = sanitized.replace(/[\u{2600}-\u{26FF}]/gu, "") // Misc symbols
+  sanitized = sanitized.replace(/[\u{2700}-\u{27BF}]/gu, "") // Dingbats
+  sanitized = sanitized.replace(/[\u{1F900}-\u{1F9FF}]/gu, "") // Supplemental Symbols and Pictographs
+  sanitized = sanitized.replace(/[\u{1FA70}-\u{1FAFF}]/gu, "") // Symbols and Pictographs Extended-A
 
-  // Preserve street numbers and addresses (e.g., 123 Main St, 4567 Oak Ave)
-  cleaned = cleaned.replace(
-    /\b\d+\s+[A-Za-z]+\s+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Blvd|Boulevard|Ln|Lane|Ct|Court|Pl|Place|Way|Circle|Cir)\b/gi,
-    (match) => {
-      const placeholder = `__PRESERVE_ADDRESS_${preserveCounter++}__`
-      preservePatterns[placeholder] = match
-      return placeholder
-    },
-  )
+  // Step 2: Replace smart quotes and punctuation with ASCII equivalents
+  sanitized = sanitized.replace(/[""]/g, '"') // Smart double quotes
+  sanitized = sanitized.replace(/['']/g, "'") // Smart single quotes
+  sanitized = sanitized.replace(/[–—]/g, "-") // Em dash, en dash
+  sanitized = sanitized.replace(/[…]/g, "...") // Ellipsis
+  sanitized = sanitized.replace(/[«»]/g, '"') // Guillemets
+  sanitized = sanitized.replace(/[‚„]/g, ",") // Various comma-like characters
 
-  // Preserve square footage numbers (e.g., 2,500 sq ft, 1500 sqft)
-  cleaned = cleaned.replace(/\b[\d,]+\s*(?:sq\s*ft|sqft|square\s+feet)\b/gi, (match) => {
-    const placeholder = `__PRESERVE_SQFT_${preserveCounter++}__`
-    preservePatterns[placeholder] = match
-    return placeholder
-  })
+  // Step 3: Remove or replace special characters that could break TTS
+  sanitized = sanitized.replace(/[®©™]/g, "") // Trademark symbols
+  sanitized = sanitized.replace(/[°]/g, " degrees ") // Degree symbol
+  sanitized = sanitized.replace(/[±]/g, " plus or minus ") // Plus-minus
+  sanitized = sanitized.replace(/[×]/g, " times ") // Multiplication
+  sanitized = sanitized.replace(/[÷]/g, " divided by ") // Division
+  sanitized = sanitized.replace(/[¼]/g, " one quarter ") // Fractions
+  sanitized = sanitized.replace(/[½]/g, " one half ")
+  sanitized = sanitized.replace(/[¾]/g, " three quarters ")
 
-  // Step 2: Convert decimals to spoken form
-  // Handle decimals like 2.5 → "two and a half", 1.5 → "one and a half"
-  cleaned = cleaned.replace(/\b(\d+)\.5\b/g, (match, whole) => {
-    const wholeNum = Number.parseInt(whole)
-    const wholeWord = numberToWords(wholeNum)
-    return `${wholeWord} and a half`
-  })
+  // Step 4: Handle currency and numbers properly
+  sanitized = sanitized.replace(/\$/g, " dollars ") // Dollar signs
+  sanitized = sanitized.replace(/[¢]/g, " cents ") // Cents
+  sanitized = sanitized.replace(/[£]/g, " pounds ") // British pounds
+  sanitized = sanitized.replace(/[€]/g, " euros ") // Euros
+  sanitized = sanitized.replace(/[¥]/g, " yen ") // Yen
 
-  // Handle other decimals like 3.2 → "three point two"
-  cleaned = cleaned.replace(/\b(\d+)\.(\d+)\b/g, (match, whole, decimal) => {
-    const wholeWord = numberToWords(Number.parseInt(whole))
-    const decimalDigits = decimal
-      .split("")
-      .map((d) => numberToWords(Number.parseInt(d)))
-      .join(" ")
-    return `${wholeWord} point ${decimalDigits}`
-  })
+  // Step 5: Remove remaining non-ASCII characters
+  // Keep only basic ASCII characters (32-126) plus common accented letters
+  sanitized = sanitized.replace(/[^\x20-\x7E\u00C0-\u00FF]/g, " ")
 
-  // Step 3: Convert numbers 1-10 to words (but not in preserved patterns)
-  cleaned = cleaned.replace(/\b([1-9]|10)\b/g, (match) => {
-    return numberToWords(Number.parseInt(match))
-  })
+  // Step 6: Clean up real estate abbreviations for better pronunciation
+  sanitized = sanitized.replace(/\bsq\.?\s*ft\.?\b/gi, "square feet")
+  sanitized = sanitized.replace(/\bsqft\b/gi, "square feet")
+  sanitized = sanitized.replace(/\bbr\.?\b/gi, "bedrooms")
+  sanitized = sanitized.replace(/\bba\.?\b/gi, "bathrooms")
+  sanitized = sanitized.replace(/\bbeds?\b/gi, "bedrooms")
+  sanitized = sanitized.replace(/\bbaths?\b/gi, "bathrooms")
+  sanitized = sanitized.replace(/\bst\.?\b/gi, "street")
+  sanitized = sanitized.replace(/\bave\.?\b/gi, "avenue")
+  sanitized = sanitized.replace(/\brd\.?\b/gi, "road")
+  sanitized = sanitized.replace(/\bdr\.?\b/gi, "drive")
+  sanitized = sanitized.replace(/\bblvd\.?\b/gi, "boulevard")
 
-  // Step 4: Replace real estate abbreviations
-  cleaned = cleaned.replace(/\bBR\b/gi, "bedrooms")
-  cleaned = cleaned.replace(/\bBA\b/gi, "bathrooms")
-  cleaned = cleaned.replace(/\bbeds?\b/gi, "bedrooms")
-  cleaned = cleaned.replace(/\bbaths?\b/gi, "bathrooms")
+  // Step 7: Handle numbers and measurements
+  sanitized = sanitized.replace(/(\d+),(\d+)/g, "$1$2") // Remove commas from numbers
+  sanitized = sanitized.replace(/\b(\d+)k\b/gi, "$1 thousand") // 250k -> 250 thousand
+  sanitized = sanitized.replace(/\b(\d+)m\b/gi, "$1 million") // 2m -> 2 million
 
-  // Step 5: Fix punctuation spacing
-  // Add space after periods if missing
-  cleaned = cleaned.replace(/\.([A-Za-z])/g, ". $1")
-  // Add space after commas if missing
-  cleaned = cleaned.replace(/,([A-Za-z])/g, ", $1")
-  // Add space after exclamation marks if missing
-  cleaned = cleaned.replace(/!([A-Za-z])/g, "! $1")
-  // Add space after question marks if missing
-  cleaned = cleaned.replace(/\?([A-Za-z])/g, "? $1")
+  // Step 8: Clean up punctuation and spacing
+  sanitized = sanitized.replace(/[^\w\s.,!?'-]/g, " ") // Remove remaining special chars
+  sanitized = sanitized.replace(/\s+/g, " ") // Normalize whitespace
+  sanitized = sanitized.replace(/\s+([.,!?])/g, "$1") // Fix spacing before punctuation
+  sanitized = sanitized.replace(/([.,!?])\s*([.,!?])/g, "$1 $2") // Fix multiple punctuation
 
-  // Step 6: Remove or replace problematic characters for TTS
-  // Remove emojis and special symbols
-  cleaned = cleaned.replace(/[🏠🚨💰📱✨🔥⚡💎📈🏃‍♂️💨📞🎵♪]/gu, "")
-  // Replace bullet points with "and"
-  cleaned = cleaned.replace(/[•·]/g, "and")
-  // Replace & with "and"
-  cleaned = cleaned.replace(/&/g, "and")
-  // Remove hashtags
-  cleaned = cleaned.replace(/#\w+/g, "")
-  // Remove @ mentions
-  cleaned = cleaned.replace(/@\w+/g, "")
+  // Step 9: Ensure proper sentence structure
+  sanitized = sanitized.replace(/\.([A-Za-z])/g, ". $1") // Space after periods
+  sanitized = sanitized.replace(/!([A-Za-z])/g, "! $1") // Space after exclamations
+  sanitized = sanitized.replace(/\?([A-Za-z])/g, "? $1") // Space after questions
 
-  // Step 7: Clean up multiple spaces and normalize whitespace
-  cleaned = cleaned.replace(/\s+/g, " ").trim()
+  // Step 10: Final cleanup
+  sanitized = sanitized.trim()
 
-  // Step 8: Restore preserved patterns
-  Object.keys(preservePatterns).forEach((placeholder) => {
-    cleaned = cleaned.replace(placeholder, preservePatterns[placeholder])
-  })
-
-  return cleaned
-}
-
-// Helper function to convert numbers to words
-function numberToWords(num: number): string {
-  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
-
-  if (num >= 0 && num <= 10) {
-    return ones[num]
+  // Ensure the text ends with proper punctuation for natural speech
+  if (sanitized && !/[.!?]$/.test(sanitized)) {
+    sanitized += "."
   }
 
-  // For numbers > 10, return as string (we only convert 1-10)
-  return num.toString()
+  console.log("✅ Script sanitization complete")
+  console.log("📝 Sanitized script length:", sanitized.length)
+  console.log("🔍 Sample sanitized text:", sanitized.substring(0, 100) + "...")
+
+  return sanitized
 }
 
-// Generate ElevenLabs Rachel voiceover with precise word-level timestamps
+// Validate that text is proper UTF-8
+function validateUTF8(text: string): boolean {
+  try {
+    // Try to encode and decode the text
+    const encoded = new TextEncoder().encode(text)
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(encoded)
+    return decoded === text
+  } catch (error) {
+    console.error("❌ UTF-8 validation failed:", error)
+    return false
+  }
+}
+
+// Generate ElevenLabs Rachel voiceover with sanitized input and proper JSON formatting
 async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
   success: boolean
   audioUrl?: string
@@ -132,10 +130,10 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
   duration?: number
   alignmentUsed?: boolean
   originalScript?: string
-  cleanedScript?: string
+  sanitizedScript?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover with precise word timestamps...")
+    console.log("🎤 Generating Rachel voiceover with sanitized script and word timestamps...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -146,70 +144,88 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       throw new Error("ElevenLabs API key appears invalid")
     }
 
-    // Clean script specifically for natural TTS speech
-    const voiceOptimizedScript = cleanTextForVoice(script)
+    // Step 1: Sanitize the script for ElevenLabs
+    const sanitizedScript = sanitizeScriptForElevenLabs(script)
+
+    // Step 2: Validate UTF-8 encoding
+    if (!validateUTF8(sanitizedScript)) {
+      throw new Error("Script contains invalid UTF-8 characters after sanitization")
+    }
+
+    // Step 3: Validate script length
+    if (sanitizedScript.length === 0) {
+      throw new Error("Script is empty after sanitization")
+    }
+
+    if (sanitizedScript.length > 5000) {
+      throw new Error("Script too long for ElevenLabs (max 5000 characters after sanitization)")
+    }
+
     console.log("📝 Original script:", script.substring(0, 100) + "...")
-    console.log("🎙️ Voice-optimized script:", voiceOptimizedScript.substring(0, 100) + "...")
+    console.log("🧹 Sanitized script:", sanitizedScript.substring(0, 100) + "...")
 
-    // Basic cleanup for TTS processing (remove remaining problematic chars)
-    const cleanScript = voiceOptimizedScript
-      .replace(/[^\w\s.,!?'-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
+    // Step 4: Prepare the request payload with proper JSON formatting
+    const requestPayload = {
+      text: sanitizedScript, // Use sanitized script
+      model_id: "eleven_monolingual_v1",
+      voice_settings: {
+        stability: 0.75,
+        similarity_boost: 0.85,
+        style: 0.25,
+        use_speaker_boost: true,
+        speaking_rate: 0.85, // 85% speed for better readability
+      },
+      output_format: "mp3_44100_128",
+      enable_logging: false,
+      timestamps: "word", // Enable word-level timestamps
+    }
 
-    // Generate audio with word-level timestamps using ElevenLabs
-    console.log("🎵 Generating Rachel audio with word-level timestamps...")
+    console.log("📦 Request payload prepared with sanitized text")
+    console.log("🔍 Payload text sample:", requestPayload.text.substring(0, 50) + "...")
+
+    // Step 5: Make API request with properly formatted JSON
+    console.log("📡 Making ElevenLabs API request with JSON.stringify()...")
 
     const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
       method: "POST",
       headers: {
-        Accept: "application/json", // Changed to JSON to get timestamps
+        Accept: "application/json", // Request JSON response for timestamps
         "Content-Type": "application/json",
         "xi-api-key": apiKey,
       },
-      body: JSON.stringify({
-        text: cleanScript, // Use voice-optimized script for TTS
-        model_id: "eleven_monolingual_v1",
-        voice_settings: {
-          stability: 0.75,
-          similarity_boost: 0.85,
-          style: 0.25,
-          use_speaker_boost: true,
-          speaking_rate: 0.85, // 85% speed for better readability
-        },
-        output_format: "mp3_44100_128",
-        enable_logging: false,
-        timestamps: "word", // Enable word-level timestamps
-      }),
+      body: JSON.stringify(requestPayload), // Properly stringify the payload
     })
+
+    console.log(`📡 ElevenLabs API response: ${response.status} ${response.statusText}`)
 
     if (!response.ok) {
       const errorText = await response.text()
+      console.error("❌ ElevenLabs API error:", response.status, errorText)
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
     }
 
     const result = await response.json()
 
-    // Extract audio and alignment data from response
+    // Step 6: Extract audio and alignment data from response
     if (!result.audio_base64) {
       throw new Error("No audio data in ElevenLabs response")
     }
 
     const audioDataUrl = `data:audio/mpeg;base64,${result.audio_base64}`
 
-    // Process word-level alignment data
+    // Step 7: Process word-level alignment data
     let wordTimings: WordTiming[] = []
     let alignmentUsed = false
 
     if (result.alignment && Array.isArray(result.alignment.words) && result.alignment.words.length > 0) {
       console.log("✅ Processing ElevenLabs word-level timestamps")
 
-      // Map original script words to cleaned script alignment
+      // Map original script words to sanitized script alignment
       const originalWords = script.split(/\s+/).filter((word) => word.length > 0)
 
       wordTimings = result.alignment.words
         .map((wordData: any, index: number) => ({
-          word: originalWords[index] || wordData.word || "", // Use original script word
+          word: originalWords[index] || wordData.word || "", // Use original script word for display
           startTime: wordData.start_time_seconds || 0,
           endTime: wordData.end_time_seconds || 0,
         }))
@@ -226,9 +242,9 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
     }
 
     const totalDuration =
-      wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(cleanScript)
+      wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(sanitizedScript)
 
-    console.log("✅ Rachel voice generated successfully with word timestamps")
+    console.log("✅ Rachel voice generated successfully with sanitized script")
     console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
     console.log(`🎯 Word-level alignment: ${alignmentUsed ? "Yes" : "No (fallback timing)"}`)
 
@@ -239,7 +255,7 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       duration: totalDuration,
       alignmentUsed,
       originalScript: script,
-      cleanedScript: voiceOptimizedScript,
+      sanitizedScript: sanitizedScript,
     }
   } catch (error) {
     console.error("❌ Rachel voice generation failed:", error)
@@ -386,7 +402,7 @@ function generateSentenceCaptions(
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 COMPLETE VIDEO GENERATION WITH PRECISE WORD TIMESTAMPS")
+    console.log("🎬 COMPLETE VIDEO GENERATION WITH SANITIZED SCRIPT")
 
     const data: VideoRequest = await request.json()
 
@@ -399,7 +415,7 @@ export async function POST(request: NextRequest) {
     console.log(`🖼️ Images: ${data.imageUrls.length}`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
-    // Step 1: Generate Rachel voice with precise word timestamps
+    // Step 1: Generate Rachel voice with sanitized script and word timestamps
     const audioResult = await generateRachelVoiceWithWordTimestamps(data.script)
     if (!audioResult.success) {
       return NextResponse.json({ error: `Voice generation failed: ${audioResult.error}` }, { status: 500 })
@@ -421,7 +437,9 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`📊 Video: ${totalDuration.toFixed(1)}s duration, ${timePerImage}s per image`)
-    console.log(`🎤 Rachel voice: 0.85x speed, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`)
+    console.log(
+      `🎤 Rachel voice: 0.85x speed, sanitized script, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
+    )
     console.log(`📝 Captions: ${captions.length} chunks with precise timing`)
 
     // Return everything needed for client-side video generation
@@ -456,6 +474,9 @@ export async function POST(request: NextRequest) {
         alignmentUsed: audioResult.alignmentUsed || false,
         captionDelay: 0, // No artificial delay - using precise timestamps
         captionType: audioResult.alignmentUsed ? "word-precise" : "sentence-estimated",
+        scriptSanitized: true,
+        originalScriptLength: data.script.length,
+        sanitizedScriptLength: audioResult.sanitizedScript?.length || 0,
       },
     })
   } catch (error) {
