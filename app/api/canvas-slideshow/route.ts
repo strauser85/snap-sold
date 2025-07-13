@@ -13,23 +13,29 @@ interface SlideshowRequest {
   }
 }
 
-// Generate voiceover using ElevenLabs
+// Generate voiceover using ElevenLabs ONLY
 async function generateElevenLabsVoiceover(script: string): Promise<string> {
   try {
-    console.log("🎤 Generating ElevenLabs voiceover...")
+    console.log("🎤 Generating ElevenLabs voiceover (PRIMARY AND ONLY)...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
-      throw new Error("ElevenLabs API key not configured")
+      throw new Error("ElevenLabs API key not configured - this is required for audio generation")
     }
 
+    // Clean script for better TTS
     const cleanScript = script
-      .replace(/[^\w\s.,!?'-]/g, " ")
-      .replace(/\s+/g, " ")
+      .replace(/[^\w\s.,!?'-]/g, " ") // Remove special characters except basic punctuation
+      .replace(/\s+/g, " ") // Normalize whitespace
+      .replace(/\$(\d+)/g, "$1 dollars") // Convert prices to speakable format
+      .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
+      .replace(/(\d+)\s*bed/gi, "$1 bedroom")
+      .replace(/(\d+)\s*bath/gi, "$1 bathroom")
       .trim()
 
-    console.log(`Script length: ${cleanScript.length} characters`)
+    console.log(`📝 Cleaned script: ${cleanScript.length} characters`)
+    console.log(`🔑 Using ElevenLabs API key: ${process.env.ELEVENLABS_API_KEY.substring(0, 8)}...`)
 
-    // Use ElevenLabs Text-to-Speech API
+    // Use ElevenLabs Text-to-Speech API with optimized settings
     const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
       method: "POST",
       headers: {
@@ -41,23 +47,40 @@ async function generateElevenLabsVoiceover(script: string): Promise<string> {
         text: cleanScript,
         model_id: "eleven_monolingual_v1",
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.5,
-          style: 0.0,
+          stability: 0.6, // Slightly more stable
+          similarity_boost: 0.8, // Higher similarity for consistency
+          style: 0.2, // Slight style variation
           use_speaker_boost: true,
         },
+        output_format: "mp3_44100_128", // High quality MP3
       }),
     })
 
+    console.log(`📡 ElevenLabs API response: ${response.status} ${response.statusText}`)
+
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("ElevenLabs API error:", response.status, errorText)
-      throw new Error(`ElevenLabs API error: ${response.status}`)
+      console.error("❌ ElevenLabs API error:", response.status, errorText)
+
+      // Provide specific error messages
+      if (response.status === 401) {
+        throw new Error("ElevenLabs API key is invalid or expired")
+      } else if (response.status === 429) {
+        throw new Error("ElevenLabs API rate limit exceeded - please try again in a moment")
+      } else if (response.status === 422) {
+        throw new Error("ElevenLabs API rejected the text - script may be too long or contain invalid characters")
+      } else {
+        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
+      }
     }
 
     // Get the audio blob
     const audioBlob = await response.blob()
-    console.log(`ElevenLabs audio generated: ${audioBlob.size} bytes`)
+    console.log(`🎵 ElevenLabs audio generated: ${audioBlob.size} bytes`)
+
+    if (audioBlob.size === 0) {
+      throw new Error("ElevenLabs returned empty audio file")
+    }
 
     // Convert blob to data URL for immediate use
     const arrayBuffer = await audioBlob.arrayBuffer()
@@ -65,64 +88,32 @@ async function generateElevenLabsVoiceover(script: string): Promise<string> {
     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
     console.log("✅ ElevenLabs voiceover generated successfully")
+    console.log(`📊 Audio data URL length: ${audioDataUrl.length} characters`)
+
     return audioDataUrl
   } catch (error) {
-    console.error("ElevenLabs voiceover generation failed:", error)
-    throw error
+    console.error("❌ ElevenLabs voiceover generation failed:", error)
+    throw error // Re-throw to fail the entire process
   }
-}
-
-// Fallback TTS using browser Speech Synthesis (server-side preparation)
-function generateFallbackScript(script: string): string {
-  console.log("⚠️ Using fallback TTS preparation")
-
-  // Clean and optimize script for speech synthesis
-  const cleanScript = script
-    .replace(/[^\w\s.,!?'-]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\$(\d+)/g, "$1 dollars") // Convert prices to speakable format
-    .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
-    .replace(/(\d+)\s*bed/gi, "$1 bedroom")
-    .replace(/(\d+)\s*bath/gi, "$1 bathroom")
-    .trim()
-
-  return cleanScript
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { imageUrls, script, propertyData }: SlideshowRequest = await request.json()
 
-    console.log(`🎬 CANVAS SLIDESHOW WITH ELEVENLABS`)
+    console.log(`🎬 CANVAS SLIDESHOW WITH ELEVENLABS ONLY`)
     console.log(`📍 Property: ${propertyData.address}`)
     console.log(`🖼️ Images: ${imageUrls.length} (ALL WILL BE USED)`)
     console.log(`📝 Script: ${script.length} characters`)
 
-    // Step 1: Generate ElevenLabs voiceover
-    let audioUrl = ""
-    let audioError = null
-    let audioMethod = "none"
+    // Step 1: Generate ElevenLabs voiceover (REQUIRED)
+    console.log("🎤 Starting ElevenLabs audio generation...")
+    const audioUrl = await generateElevenLabsVoiceover(script)
+    console.log("✅ ElevenLabs audio generation completed")
 
-    try {
-      audioUrl = await generateElevenLabsVoiceover(script)
-      audioMethod = "elevenlabs"
-      console.log("✅ ElevenLabs voiceover generated successfully")
-    } catch (error) {
-      console.log("⚠️ ElevenLabs failed, preparing fallback TTS")
-      audioError = error instanceof Error ? error.message : "ElevenLabs generation failed"
-
-      // Prepare script for browser-based TTS fallback
-      const optimizedScript = generateFallbackScript(script)
-      audioMethod = "browser-fallback"
-
-      // Return script for browser TTS instead of audio URL
-      audioUrl = `tts:${optimizedScript}`
-    }
-
-    // Step 2: Calculate slideshow timing
+    // Step 2: Calculate slideshow timing based on script
     const wordCount = script.split(" ").length
-    const estimatedSpeechDuration =
-      audioMethod === "elevenlabs" ? Math.max(30, wordCount * 0.5) : Math.max(45, wordCount * 0.6)
+    const estimatedSpeechDuration = Math.max(30, wordCount * 0.5) // 0.5 seconds per word
     const timePerImage = Math.max(3, Math.floor(estimatedSpeechDuration / imageUrls.length))
     const totalDuration = imageUrls.length * timePerImage
 
@@ -131,14 +122,14 @@ export async function POST(request: NextRequest) {
     console.log(`   - ${timePerImage} seconds per image`)
     console.log(`   - ${totalDuration} seconds total`)
     console.log(`   - ${wordCount} words in script`)
-    console.log(`   - Audio method: ${audioMethod}`)
+    console.log(`   - Audio method: ElevenLabs ONLY`)
 
     // Step 3: Return slideshow configuration
     return NextResponse.json({
       success: true,
-      audioUrl: audioUrl || null,
-      audioError: audioError,
-      audioMethod: audioMethod,
+      audioUrl: audioUrl,
+      audioError: null,
+      audioMethod: "elevenlabs",
       slideshow: {
         images: imageUrls,
         timePerImage: timePerImage,
@@ -152,27 +143,39 @@ export async function POST(request: NextRequest) {
       },
       metadata: {
         generatedAt: new Date().toISOString(),
-        method: "canvas-slideshow-elevenlabs",
+        method: "canvas-slideshow-elevenlabs-only",
         imageCount: imageUrls.length,
-        hasAudio: !!audioUrl,
-        audioMethod: audioMethod,
+        hasAudio: true,
+        audioMethod: "elevenlabs",
         allImagesUsed: true,
         reliable: true,
-        cost: audioMethod === "elevenlabs" ? "elevenlabs-api" : "free",
+        cost: "elevenlabs-api",
       },
       instructions: {
         message: "Canvas slideshow with ElevenLabs audio ready",
         nextStep: "Client-side Canvas generation will create the video",
         guarantee: `ALL ${imageUrls.length} images will be used`,
-        audioStatus: audioMethod === "elevenlabs" ? "ElevenLabs TTS generated" : "Browser TTS fallback prepared",
+        audioStatus: "ElevenLabs TTS generated successfully",
+        fallback: "NONE - ElevenLabs is required",
       },
     })
   } catch (error) {
-    console.error("Canvas slideshow API error:", error)
+    console.error("❌ Canvas slideshow API error:", error)
+
+    // Provide specific error message for ElevenLabs failures
+    let errorMessage = "Canvas slideshow preparation failed"
+    const errorDetails = error instanceof Error ? error.message : String(error)
+
+    if (errorDetails.includes("ElevenLabs")) {
+      errorMessage = "ElevenLabs audio generation failed"
+    }
+
     return NextResponse.json(
       {
-        error: "Canvas slideshow preparation failed",
-        details: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
+        details: errorDetails,
+        audioRequired: true,
+        solution: "Please ensure ElevenLabs API key is configured and valid",
       },
       { status: 500 },
     )
