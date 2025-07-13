@@ -136,33 +136,16 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
     console.log("🔍 Payload text sample:", requestPayload.text.substring(0, 50) + "...")
 
     // Step 5: Make API request with properly formatted JSON
-    console.log("📡 Making ElevenLabs API request with JSON.stringify()...")
-    console.log("🔍 RAW PAYLOAD BEFORE JSON.stringify():")
-    console.log("   - text length:", requestPayload.text.length)
-    console.log("   - text sample:", requestPayload.text.substring(0, 200))
-    console.log("   - model_id:", requestPayload.model_id)
-    console.log("   - voice_settings:", JSON.stringify(requestPayload.voice_settings))
-
-    // Test JSON.stringify() before sending
-    let jsonPayload: string
-    try {
-      jsonPayload = JSON.stringify(requestPayload)
-      console.log("✅ JSON.stringify() successful - payload length:", jsonPayload.length)
-      console.log("🔍 JSON payload sample:", jsonPayload.substring(0, 200))
-    } catch (jsonError) {
-      console.error("❌ JSON.stringify() FAILED:", jsonError)
-      console.error("🔍 Problematic payload:", requestPayload)
-      throw new Error(`JSON serialization failed: ${jsonError}`)
-    }
+    console.log("📡 Making ElevenLabs API request...")
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM`, {
       method: "POST",
       headers: {
-        Accept: "application/json",
+        Accept: "audio/mpeg", // Request audio directly
         "Content-Type": "application/json",
         "xi-api-key": apiKey,
       },
-      body: jsonPayload, // Use pre-tested JSON payload
+      body: JSON.stringify(requestPayload),
     })
 
     console.log(`📡 ElevenLabs API response: ${response.status} ${response.statusText}`)
@@ -173,56 +156,34 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
     }
 
-    const result = await response.json()
+    // Step 6: Handle audio response (not JSON)
+    const audioBlob = await response.blob()
+    console.log(`🎵 Audio blob received: ${audioBlob.size} bytes`)
 
-    // Step 6: Extract audio and alignment data from response
-    if (!result.audio_base64) {
-      throw new Error("No audio data in ElevenLabs response")
+    if (audioBlob.size === 0) {
+      throw new Error("ElevenLabs returned empty audio")
     }
 
-    const audioDataUrl = `data:audio/mpeg;base64,${result.audio_base64}`
+    // Convert to data URL
+    const arrayBuffer = await audioBlob.arrayBuffer()
+    const base64Audio = Buffer.from(arrayBuffer).toString("base64")
+    const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
-    // Step 7: Process word-level alignment data
-    let wordTimings: WordTiming[] = []
-    let alignmentUsed = false
+    // Step 7: Generate fallback word timings (ElevenLabs basic API doesn't include timestamps)
+    console.log("⚠️ Using fallback word timing generation")
+    const words = script.split(/\s+/).filter((w) => w.length > 0)
+    const wordTimings = generateFallbackWordTimings(words, 0)
+    const totalDuration = estimateDuration(cleanScript)
 
-    if (result.alignment && Array.isArray(result.alignment.words) && result.alignment.words.length > 0) {
-      console.log("✅ Processing ElevenLabs word-level timestamps")
-
-      // Map original script words to sanitized script alignment
-      const originalWords = script.split(/\s+/).filter((word) => word.length > 0)
-
-      wordTimings = result.alignment.words
-        .map((wordData: any, index: number) => ({
-          word: originalWords[index] || wordData.word || "", // Use original script word for display
-          startTime: wordData.start_time_seconds || 0,
-          endTime: wordData.end_time_seconds || 0,
-        }))
-        .filter((timing: WordTiming) => timing.word.length > 0)
-
-      alignmentUsed = true
-      console.log(`✅ Processed ${wordTimings.length} word timestamps from ElevenLabs`)
-    } else {
-      console.warn("⚠️ No word timestamps from ElevenLabs - using fallback timing")
-      wordTimings = generateFallbackWordTimings(
-        script.split(/\s+/).filter((w) => w.length > 0),
-        0,
-      )
-    }
-
-    const totalDuration =
-      wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].endTime + 1 : estimateDuration(cleanScript)
-
-    console.log("✅ Rachel voice generated successfully with sanitized script")
+    console.log("✅ Rachel voice generated successfully")
     console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
-    console.log(`🎯 Word-level alignment: ${alignmentUsed ? "Yes" : "No (fallback timing)"}`)
 
     return {
       success: true,
       audioUrl: audioDataUrl,
       wordTimings,
       duration: totalDuration,
-      alignmentUsed,
+      alignmentUsed: false, // Using fallback timing
       originalScript: script,
       sanitizedScript: cleanScript,
     }
