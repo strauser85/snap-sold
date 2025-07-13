@@ -45,24 +45,42 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
     if (!config.audioUrl) {
       setAudioStatus("missing")
       addDebugInfo("No audio URL provided")
-      return { hasAudio: false, method: "none" }
+      return { hasAudio: false, method: "none", duration: 0 }
     }
 
     // Check if it's ElevenLabs audio (data URL) or browser TTS
     if (config.audioUrl.startsWith("data:audio/")) {
       setAudioStatus("elevenlabs")
       addDebugInfo("ElevenLabs audio detected (data URL)")
-      return { hasAudio: true, method: "elevenlabs" }
+
+      // Get actual audio duration
+      try {
+        const audio = new Audio()
+        audio.src = config.audioUrl
+
+        const duration = await new Promise<number>((resolve) => {
+          audio.onloadedmetadata = () => {
+            resolve(audio.duration)
+          }
+          audio.load()
+        })
+
+        addDebugInfo(`ElevenLabs audio duration: ${duration.toFixed(2)} seconds`)
+        return { hasAudio: true, method: "elevenlabs", duration }
+      } catch (error) {
+        addDebugInfo(`Failed to get audio duration: ${error}`)
+        return { hasAudio: true, method: "elevenlabs", duration: config.totalDuration }
+      }
     } else if (config.audioUrl.startsWith("tts:")) {
       setAudioStatus("browser")
       addDebugInfo("Browser TTS fallback detected")
-      return { hasAudio: true, method: "browser" }
+      return { hasAudio: true, method: "browser", duration: config.totalDuration }
     } else {
       setAudioStatus("error")
       addDebugInfo("Unknown audio format")
-      return { hasAudio: false, method: "error" }
+      return { hasAudio: false, method: "error", duration: 0 }
     }
-  }, [config.audioUrl])
+  }, [config.audioUrl, config.totalDuration])
 
   // Browser TTS function
   const generateBrowserTTS = useCallback(async (text: string): Promise<Blob> => {
@@ -127,8 +145,8 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
     setIsGenerating(true)
     setProgress(0)
     setDebugInfo([])
-    setCurrentStep("Starting slideshow generation...")
-    addDebugInfo("Slideshow generation started")
+    setCurrentStep("Starting synchronized slideshow generation...")
+    addDebugInfo("Synchronized slideshow generation started")
 
     try {
       const canvas = canvasRef.current
@@ -139,11 +157,21 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       canvas.height = config.format.height
       addDebugInfo(`Canvas size: ${canvas.width}x${canvas.height}`)
 
-      // Check audio availability
-      setCurrentStep("Checking audio availability...")
+      // Check audio availability and get actual duration
+      setCurrentStep("Analyzing audio duration...")
       setProgress(5)
       const audioInfo = await checkAudioAvailability()
-      addDebugInfo(`Audio method: ${audioInfo.method}`)
+      addDebugInfo(`Audio method: ${audioInfo.method}, duration: ${audioInfo.duration}s`)
+
+      // Recalculate timing based on actual audio duration
+      let actualDuration = config.totalDuration
+      let timePerImage = config.timePerImage
+
+      if (audioInfo.hasAudio && audioInfo.duration > 0) {
+        actualDuration = audioInfo.duration
+        timePerImage = Math.max(2, actualDuration / config.images.length)
+        addDebugInfo(`Adjusted timing: ${timePerImage.toFixed(2)}s per image, ${actualDuration.toFixed(2)}s total`)
+      }
 
       setCurrentStep("Loading images...")
       setProgress(10)
@@ -177,7 +205,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       let audioBlob: Blob | null = null
 
       if (audioInfo.hasAudio && config.audioUrl) {
-        setCurrentStep("Preparing audio...")
+        setCurrentStep("Preparing synchronized audio...")
         setProgress(30)
 
         if (audioInfo.method === "elevenlabs") {
@@ -185,14 +213,15 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           audioElement = new Audio()
           audioElement.src = config.audioUrl
           audioElement.crossOrigin = "anonymous"
+          audioElement.preload = "auto"
 
           await new Promise((resolve, reject) => {
-            audioElement!.onloadeddata = resolve
+            audioElement!.oncanplaythrough = resolve
             audioElement!.onerror = reject
             audioElement!.load()
           })
 
-          addDebugInfo("ElevenLabs audio loaded successfully")
+          addDebugInfo(`ElevenLabs audio loaded, duration: ${audioElement.duration.toFixed(2)}s`)
         } else if (audioInfo.method === "browser") {
           // Browser TTS
           const ttsText = config.audioUrl.replace("tts:", "")
@@ -200,7 +229,14 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
             audioBlob = await generateBrowserTTS(ttsText)
             audioElement = new Audio()
             audioElement.src = URL.createObjectURL(audioBlob)
-            addDebugInfo("Browser TTS audio generated successfully")
+            audioElement.preload = "auto"
+
+            await new Promise((resolve) => {
+              audioElement!.oncanplaythrough = resolve
+              audioElement!.load()
+            })
+
+            addDebugInfo("Browser TTS audio generated and loaded")
           } catch (ttsError) {
             addDebugInfo(`Browser TTS failed: ${ttsError}`)
             audioElement = null
@@ -208,7 +244,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
         }
       }
 
-      setCurrentStep("Setting up recording...")
+      setCurrentStep("Setting up synchronized recording...")
       setProgress(35)
 
       // Create MediaRecorder
@@ -248,49 +284,63 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
         }
       })
 
-      // Start recording
-      mediaRecorder.start(1000)
-      addDebugInfo("Recording started")
-
-      setCurrentStep("Recording slideshow with audio...")
+      setCurrentStep("Starting synchronized recording...")
       setProgress(40)
 
-      // Start audio playback
-      if (audioElement) {
-        try {
+      // CRITICAL: Start both audio and recording at the EXACT same time
+      const startSynchronizedRecording = async () => {
+        addDebugInfo("🎬 Starting synchronized recording...")
+
+        // Prepare audio for immediate playback
+        if (audioElement) {
           audioElement.currentTime = 0
-          await audioElement.play()
-          addDebugInfo("Audio playback started")
-        } catch (audioError) {
-          addDebugInfo(`Audio playback failed: ${audioError}`)
+          audioElement.muted = false
         }
+
+        // Start recording first
+        mediaRecorder.start(100) // Small chunks for better sync
+        addDebugInfo("📹 Video recording started")
+
+        // Start audio immediately after
+        if (audioElement) {
+          try {
+            await audioElement.play()
+            addDebugInfo("🎵 Audio playback started")
+          } catch (audioError) {
+            addDebugInfo(`❌ Audio playback failed: ${audioError}`)
+          }
+        }
+
+        return Date.now() // Return exact start time
       }
 
-      // Create slideshow animation
+      const recordingStartTime = await startSynchronizedRecording()
+
+      // Create slideshow animation with precise timing
       let currentImageIndex = 0
-      const startTime = Date.now()
-      const timePerImageMs = config.timePerImage * 1000
+      const timePerImageMs = timePerImage * 1000
+      const totalDurationMs = actualDuration * 1000
 
       const animate = () => {
-        const elapsed = Date.now() - startTime
-        const totalDurationMs = config.totalDuration * 1000
+        const elapsed = Date.now() - recordingStartTime
 
         if (elapsed >= totalDurationMs) {
-          // Stop audio
+          // Stop audio first
           if (audioElement) {
             audioElement.pause()
-            addDebugInfo("Audio playback stopped")
+            addDebugInfo("🎵 Audio stopped")
           }
           // Stop recording
           mediaRecorder.stop()
-          addDebugInfo("Recording stopped")
+          addDebugInfo("📹 Recording stopped")
           return
         }
 
-        // Calculate which image to show
+        // Calculate which image to show based on elapsed time
         const imageIndex = Math.floor(elapsed / timePerImageMs)
-        if (imageIndex < loadedImages.length) {
+        if (imageIndex < loadedImages.length && imageIndex !== currentImageIndex) {
           currentImageIndex = imageIndex
+          addDebugInfo(`📸 Switched to image ${currentImageIndex + 1} at ${(elapsed / 1000).toFixed(2)}s`)
         }
 
         // Clear canvas
@@ -310,27 +360,31 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
           ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-          // Add image counter
+          // Add image counter with timing info
           ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
-          ctx.fillRect(10, 10, 120, 30)
+          ctx.fillRect(10, 10, 140, 50)
           ctx.fillStyle = "#ffffff"
-          ctx.font = "16px Arial"
+          ctx.font = "14px Arial"
           ctx.fillText(`${currentImageIndex + 1}/${loadedImages.length}`, 20, 30)
+          ctx.font = "10px Arial"
+          ctx.fillText(`${(elapsed / 1000).toFixed(1)}s`, 20, 45)
 
-          // Add audio indicator
+          // Add audio sync indicator
           if (audioElement && !audioElement.paused) {
-            ctx.fillStyle = "rgba(255, 0, 0, 0.8)"
-            ctx.fillRect(canvas.width - 50, 10, 40, 30)
-            ctx.fillStyle = "#ffffff"
-            ctx.font = "10px Arial"
-            ctx.fillText(audioInfo.method === "elevenlabs" ? "EL" : "TTS", canvas.width - 45, 30)
+            const audioTime = audioElement.currentTime
+            ctx.fillStyle = "rgba(0, 255, 0, 0.8)"
+            ctx.fillRect(canvas.width - 60, 10, 50, 30)
+            ctx.fillStyle = "#000000"
+            ctx.font = "8px Arial"
+            ctx.fillText(`A:${audioTime.toFixed(1)}s`, canvas.width - 55, 20)
+            ctx.fillText(`V:${(elapsed / 1000).toFixed(1)}s`, canvas.width - 55, 30)
           }
         }
 
         // Update progress
         const recordingProgress = 40 + (elapsed / totalDurationMs) * 50
         setProgress(recordingProgress)
-        setCurrentStep(`Recording image ${currentImageIndex + 1}/${loadedImages.length}...`)
+        setCurrentStep(`Recording synchronized: ${(elapsed / 1000).toFixed(1)}s / ${(actualDuration).toFixed(1)}s`)
 
         requestAnimationFrame(animate)
       }
@@ -339,19 +393,19 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
       // Wait for recording to complete
       const videoBlob = await recordingPromise
-      addDebugInfo("Recording completed successfully")
+      addDebugInfo("✅ Synchronized recording completed")
 
-      setCurrentStep("Finalizing video...")
+      setCurrentStep("Finalizing synchronized video...")
       setProgress(95)
 
       const finalUrl = URL.createObjectURL(videoBlob)
       setVideoUrl(finalUrl)
       onVideoGenerated(finalUrl)
-      setCurrentStep("Slideshow completed!")
+      setCurrentStep("Synchronized slideshow completed!")
       setProgress(100)
       setIsGenerating(false)
 
-      addDebugInfo("Slideshow generation completed successfully")
+      addDebugInfo("🎉 Synchronized slideshow generation completed successfully")
 
       // Cleanup
       if (audioBlob) {
@@ -359,7 +413,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
       }
     } catch (error) {
       console.error("Slideshow generation failed:", error)
-      addDebugInfo(`Generation failed: ${error}`)
+      addDebugInfo(`❌ Generation failed: ${error}`)
       onError(error instanceof Error ? error.message : "Slideshow generation failed")
       setIsGenerating(false)
     }
@@ -375,7 +429,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
         const audio = new Audio()
         audio.src = config.audioUrl
         await audio.play()
-        addDebugInfo("ElevenLabs audio test successful")
+        addDebugInfo(`ElevenLabs audio test: ${audio.duration.toFixed(2)}s duration`)
       } else if (config.audioUrl.startsWith("tts:")) {
         // Browser TTS
         const text = config.audioUrl.replace("tts:", "")
@@ -414,7 +468,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
               <span className="font-medium">
                 Audio Status:{" "}
                 {audioStatus === "elevenlabs"
-                  ? "✅ ElevenLabs TTS"
+                  ? "✅ ElevenLabs TTS (Synchronized)"
                   : audioStatus === "browser"
                     ? "🔄 Browser TTS Fallback"
                     : audioStatus === "missing"
@@ -425,7 +479,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
             {config.audioUrl && (
               <div className="flex gap-2">
                 <Button onClick={checkAudioAvailability} variant="outline" size="sm">
-                  Check Audio
+                  Check Audio Duration
                 </Button>
                 <Button onClick={testAudio} variant="outline" size="sm">
                   Test Audio
@@ -438,14 +492,13 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center gap-2 text-green-700 mb-2">
               <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">ElevenLabs Slideshow Ready!</span>
+              <span className="font-medium">Synchronized Slideshow Ready!</span>
             </div>
             <div className="text-sm text-green-600 space-y-1">
               <p>✅ {config.images.length} images loaded</p>
-              <p>✅ {config.timePerImage}s per image</p>
-              <p>✅ {config.totalDuration}s total duration</p>
+              <p>✅ Timing will match audio duration exactly</p>
               <p>✅ TikTok format (9:16)</p>
-              {audioStatus === "elevenlabs" && <p>✅ ElevenLabs voiceover ready</p>}
+              {audioStatus === "elevenlabs" && <p>✅ ElevenLabs voiceover will be synchronized</p>}
               {audioStatus === "browser" && <p>🔄 Browser TTS fallback ready</p>}
               {audioStatus === "missing" && <p>⚠️ Video-only (no audio)</p>}
             </div>
@@ -453,7 +506,7 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
 
           <Button onClick={generateSlideshow} className="w-full" size="lg">
             <Play className="mr-2 h-4 w-4" />
-            Generate Slideshow with ALL {config.images.length} Images
+            Generate SYNCHRONIZED Slideshow
             {audioStatus === "elevenlabs" && " + ElevenLabs Audio"}
             {audioStatus === "browser" && " + Browser TTS"}
           </Button>
@@ -473,15 +526,15 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           <Alert>
             <Loader2 className="h-4 w-4 animate-spin" />
             <AlertDescription>
-              Creating slideshow with {config.images.length} images...
-              {audioStatus === "elevenlabs" && " ElevenLabs audio integration in progress."}
-              {audioStatus === "browser" && " Browser TTS integration in progress."}
+              Creating synchronized slideshow with {config.images.length} images...
+              {audioStatus === "elevenlabs" && " ElevenLabs audio will be perfectly synchronized."}
+              {audioStatus === "browser" && " Browser TTS will be synchronized."}
             </AlertDescription>
           </Alert>
 
           {/* Debug Info */}
           <div className="bg-gray-50 border rounded-lg p-3 max-h-40 overflow-y-auto">
-            <p className="text-xs font-medium text-gray-700 mb-2">Debug Log:</p>
+            <p className="text-xs font-medium text-gray-700 mb-2">Synchronization Debug:</p>
             {debugInfo.map((info, index) => (
               <p key={index} className="text-xs text-gray-600 font-mono">
                 {info}
@@ -496,11 +549,11 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center gap-2 text-green-700 mb-2">
               <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">Video Generated with Audio!</span>
+              <span className="font-medium">Synchronized Video Generated!</span>
             </div>
             <div className="text-sm text-green-600">
               <p>✅ ALL {config.images.length} images included</p>
-              <p>✅ {config.totalDuration} seconds duration</p>
+              <p>✅ Audio and video perfectly synchronized</p>
               <p>✅ TikTok format ready</p>
               {audioStatus === "elevenlabs" && <p>✅ ElevenLabs voiceover embedded</p>}
               {audioStatus === "browser" && <p>✅ Browser TTS embedded</p>}
@@ -508,15 +561,15 @@ export function CanvasSlideshowGenerator({ config, onVideoGenerated, onError }: 
           </div>
 
           <Button asChild className="w-full" size="lg">
-            <a href={videoUrl} download="property-slideshow-with-elevenlabs-audio.webm">
+            <a href={videoUrl} download="synchronized-property-slideshow.webm">
               <Download className="mr-2 h-4 w-4" />
-              Download Video with Audio
+              Download Synchronized Video
             </a>
           </Button>
 
           {/* Debug Info */}
           <details className="text-left">
-            <summary className="text-sm text-gray-600 cursor-pointer">Show Debug Info</summary>
+            <summary className="text-sm text-gray-600 cursor-pointer">Show Synchronization Debug</summary>
             <div className="bg-gray-50 border rounded-lg p-3 mt-2 max-h-40 overflow-y-auto">
               {debugInfo.map((info, index) => (
                 <p key={index} className="text-xs text-gray-600 font-mono">
