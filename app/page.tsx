@@ -20,6 +20,7 @@ import {
   Volume2,
   Upload,
   Sparkles,
+  RefreshCw,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
 import { FinalVideoGenerator } from "@/components/final-video-generator"
@@ -59,10 +60,12 @@ export default function VideoGenerator() {
   const [progress, setProgress] = useState<GenerationProgress | null>(null)
   const [result, setResult] = useState<VideoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [canRetry, setCanRetry] = useState(false)
 
   const [videoConfig, setVideoConfig] = useState<any>(null)
   const [propertyData, setPropertyData] = useState<any>(null)
   const [showGenerator, setShowGenerator] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<any>(null)
 
   const MAX_IMAGES = 15
 
@@ -233,6 +236,7 @@ export default function VideoGenerator() {
     setError(null)
     setResult(null)
     setProgress(null)
+    setCanRetry(false)
 
     try {
       setProgress({ step: "Generating Rachel voiceover and TikTok captions...", progress: 25 })
@@ -254,16 +258,18 @@ export default function VideoGenerator() {
         }),
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || `Server error: ${response.status}`)
-      }
-
       const data = await response.json()
+
+      if (!response.ok) {
+        setCanRetry(data.canRetry || false)
+        setDebugInfo(data.debugInfo)
+        throw new Error(data.details || data.error || `Server error: ${response.status}`)
+      }
 
       if (data.success && data.videoConfig) {
         setVideoConfig(data.videoConfig)
         setPropertyData(data.property)
+        setDebugInfo(data.debugInfo)
         setShowGenerator(true)
         setProgress({ step: "Final video generator ready!", progress: 100 })
       } else {
@@ -275,6 +281,12 @@ export default function VideoGenerator() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const retryGeneration = () => {
+    setError(null)
+    setCanRetry(false)
+    handleGenerateFinalVideo()
   }
 
   const resetForm = () => {
@@ -294,6 +306,8 @@ export default function VideoGenerator() {
     setVideoConfig(null)
     setPropertyData(null)
     setShowGenerator(false)
+    setDebugInfo(null)
+    setCanRetry(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -577,11 +591,29 @@ export default function VideoGenerator() {
           </Card>
         )}
 
-        {/* Error */}
+        {/* Error with Retry */}
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <div className="space-y-3">
+                <p>{error}</p>
+                {canRetry && (
+                  <Button onClick={retryGeneration} variant="outline" size="sm" className="bg-white">
+                    <RefreshCw className="mr-2 h-3 w-3" />
+                    Retry Generation
+                  </Button>
+                )}
+                {debugInfo && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer">Show Debug Info</summary>
+                    <pre className="mt-2 p-2 bg-gray-100 rounded text-black overflow-auto">
+                      {JSON.stringify(debugInfo, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            </AlertDescription>
           </Alert>
         )}
 

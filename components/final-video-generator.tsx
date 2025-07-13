@@ -43,6 +43,8 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
   const [currentStep, setCurrentStep] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [currentCaption, setCurrentCaption] = useState("")
+  const [audioTested, setAudioTested] = useState(false)
+  const [audioReady, setAudioReady] = useState(false)
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -54,7 +56,37 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
     })
   }, [])
 
-  // TikTok-style caption styling
+  // Test audio when component mounts
+  const testAudio = useCallback(async () => {
+    if (!config.audioUrl || !audioRef.current || audioTested) return
+
+    try {
+      const audio = audioRef.current
+      audio.src = config.audioUrl
+
+      await new Promise((resolve, reject) => {
+        audio.oncanplaythrough = () => {
+          setAudioReady(true)
+          setAudioTested(true)
+          console.log("✅ Rachel audio loaded successfully")
+          resolve(null)
+        }
+        audio.onerror = (e) => {
+          setAudioReady(false)
+          setAudioTested(true)
+          console.error("❌ Rachel audio loading failed:", e)
+          reject(new Error("Audio loading failed"))
+        }
+        audio.load()
+      })
+    } catch (error) {
+      console.error("Audio test failed:", error)
+      setAudioReady(false)
+      setAudioTested(true)
+    }
+  }, [config.audioUrl, audioTested])
+
+  // TikTok-style caption styling with animations
   const drawTikTokCaption = useCallback((ctx: CanvasRenderingContext2D, text: string, canvas: HTMLCanvasElement) => {
     if (!text) return
 
@@ -68,29 +100,40 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
     }
 
     // Caption styling - TikTok style
-    const fontSize = Math.floor(canvas.width * 0.08) // Responsive font size
-    ctx.font = `bold ${fontSize}px Arial, sans-serif`
+    const fontSize = Math.floor(canvas.width * 0.09) // Larger font for impact
+    ctx.font = `900 ${fontSize}px Arial, sans-serif` // Extra bold
     ctx.textAlign = "center"
 
-    const lineHeight = fontSize * 1.2
+    const lineHeight = fontSize * 1.3
     const totalHeight = lines.length * lineHeight
-    const startY = canvas.height * 0.75 // Position captions in lower third
+    const startY = canvas.height * 0.72 // Position captions in lower third
 
     lines.forEach((line, index) => {
       const y = startY + index * lineHeight
 
-      // Black outline/shadow for readability
+      // Multiple shadow layers for depth
       ctx.strokeStyle = "#000000"
-      ctx.lineWidth = Math.floor(fontSize * 0.15)
+      ctx.lineWidth = Math.floor(fontSize * 0.2)
       ctx.strokeText(line, canvas.width / 2, y)
 
-      // White text
+      // Secondary shadow
+      ctx.strokeStyle = "#333333"
+      ctx.lineWidth = Math.floor(fontSize * 0.1)
+      ctx.strokeText(line, canvas.width / 2 + 2, y + 2)
+
+      // Main text
       ctx.fillStyle = "#FFFFFF"
       ctx.fillText(line, canvas.width / 2, y)
 
-      // Add yellow highlight for emphasis (TikTok style)
-      if (line.includes("$") || line.includes("BEDROOM") || line.includes("BATHROOM")) {
-        ctx.fillStyle = "#FFD700"
+      // Highlight key terms
+      if (line.includes("$") || line.includes("BEDROOM") || line.includes("BATHROOM") || line.includes("SQFT")) {
+        ctx.fillStyle = "#FFD700" // Gold highlight
+        ctx.fillText(line, canvas.width / 2, y)
+      }
+
+      // Add emphasis for action words
+      if (line.includes("NOW") || line.includes("TODAY") || line.includes("CALL") || line.includes("DM")) {
+        ctx.fillStyle = "#FF4444" // Red for urgency
         ctx.fillText(line, canvas.width / 2, y)
       }
     })
@@ -99,6 +142,16 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
   const generateFinalVideo = useCallback(async () => {
     if (!canvasRef.current) {
       onError("Canvas not available")
+      return
+    }
+
+    // Test audio first
+    if (!audioTested) {
+      await testAudio()
+    }
+
+    if (!audioReady) {
+      onError("Rachel audio failed to load. Please try again.")
       return
     }
 
@@ -122,7 +175,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         try {
           const img = await loadImage(config.images[i])
           loadedImages.push(img)
-          setProgress(10 + (i / config.images.length) * 20)
+          setProgress(10 + (i / config.images.length) * 25)
         } catch (error) {
           console.warn(`Failed to load image ${i + 1}:`, error)
         }
@@ -134,20 +187,14 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
 
       // Setup audio
       setCurrentStep("Setting up Rachel voiceover...")
-      setProgress(30)
+      setProgress(35)
 
       const audioElement = audioRef.current!
       audioElement.src = config.audioUrl
 
-      await new Promise((resolve, reject) => {
-        audioElement.oncanplaythrough = resolve
-        audioElement.onerror = reject
-        audioElement.load()
-      })
-
       // Setup recording with audio
-      setCurrentStep("Setting up video recording...")
-      setProgress(40)
+      setCurrentStep("Setting up video recording with audio...")
+      setProgress(45)
 
       let stream: MediaStream
       let audioContext: AudioContext | null = null
@@ -156,27 +203,44 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         // Create canvas stream
         stream = canvas.captureStream(config.format.fps)
 
-        // Add audio track
+        // Add audio track using Web Audio API
         audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
         const audioSource = audioContext.createMediaElementSource(audioElement)
         const audioDestination = audioContext.createMediaStreamDestination()
 
+        // Connect audio
         audioSource.connect(audioDestination)
-        audioSource.connect(audioContext.destination)
+        audioSource.connect(audioContext.destination) // Also play through speakers
 
         const audioTrack = audioDestination.stream.getAudioTracks()[0]
         if (audioTrack) {
           stream.addTrack(audioTrack)
+          console.log("✅ Rachel audio track added to video stream")
         }
       } catch (audioError) {
         console.warn("Audio setup failed:", audioError)
         stream = canvas.captureStream(config.format.fps)
       }
 
-      // Setup MediaRecorder
+      // Setup MediaRecorder with best quality
+      const supportedTypes = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm;codecs=vp9",
+        "video/webm",
+      ]
+
+      let selectedType = "video/webm"
+      for (const type of supportedTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          selectedType = type
+          break
+        }
+      }
+
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp9,opus",
-        videoBitsPerSecond: 3000000,
+        mimeType: selectedType,
+        videoBitsPerSecond: 4000000, // Higher quality
         audioBitsPerSecond: 128000,
       })
 
@@ -203,15 +267,15 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
             throw new Error("No video data recorded")
           }
 
-          setCurrentStep("Creating final MP4 video...")
+          setCurrentStep("Creating final video file...")
           setProgress(95)
 
-          const videoBlob = new Blob(chunks, { type: "video/webm" })
+          const videoBlob = new Blob(chunks, { type: selectedType })
           const videoUrl = URL.createObjectURL(videoBlob)
 
           setVideoUrl(videoUrl)
           onVideoGenerated(videoUrl)
-          setCurrentStep("Final video generated successfully!")
+          setCurrentStep("Final video with Rachel voice generated!")
           setProgress(100)
         } catch (error) {
           onError(error instanceof Error ? error.message : "Video creation failed")
@@ -227,7 +291,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
 
       // Start recording and audio
       setCurrentStep("Recording final video with Rachel voiceover...")
-      setProgress(50)
+      setProgress(55)
 
       mediaRecorder.start(100)
       audioElement.currentTime = 0
@@ -263,8 +327,11 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         // Draw current image
         const img = loadedImages[imageIndex]
         if (img) {
-          // Clear canvas
-          ctx.fillStyle = "#000000"
+          // Clear canvas with gradient background
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+          gradient.addColorStop(0, "#000000")
+          gradient.addColorStop(1, "#1a1a1a")
+          ctx.fillStyle = gradient
           ctx.fillRect(0, 0, canvas.width, canvas.height)
 
           // Draw image (scaled and centered)
@@ -281,26 +348,39 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
             drawTikTokCaption(ctx, currentCaptionChunk.text, canvas)
           }
 
-          // Property info overlay (top)
-          ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
-          ctx.fillRect(10, 10, canvas.width - 20, 80)
+          // Property info overlay (top) - more stylish
+          const overlayGradient = ctx.createLinearGradient(0, 0, 0, 100)
+          overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.8)")
+          overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.4)")
+          ctx.fillStyle = overlayGradient
+          ctx.fillRect(0, 0, canvas.width, 100)
 
           ctx.fillStyle = "#FFFFFF"
-          ctx.font = "bold 16px Arial"
+          ctx.font = "bold 18px Arial"
           ctx.textAlign = "left"
-          ctx.fillText(property.address, 20, 35)
+          ctx.fillText(property.address, 20, 30)
 
+          ctx.fillStyle = "#FFD700"
+          ctx.font = "bold 16px Arial"
+          ctx.fillText(`$${property.price.toLocaleString()}`, 20, 50)
+
+          ctx.fillStyle = "#FFFFFF"
           ctx.font = "14px Arial"
-          ctx.fillText(`$${property.price.toLocaleString()}`, 20, 55)
           ctx.fillText(
             `${property.bedrooms}BR • ${property.bathrooms}BA • ${property.sqft.toLocaleString()} sqft`,
             20,
-            75,
+            70,
           )
+
+          // Rachel voice indicator
+          ctx.fillStyle = "#FF69B4"
+          ctx.font = "bold 12px Arial"
+          ctx.textAlign = "right"
+          ctx.fillText("🎤 Rachel Voice", canvas.width - 20, 85)
         }
 
         // Update progress
-        const recordingProgress = 50 + (elapsed / durationMs) * 45
+        const recordingProgress = 55 + (elapsed / durationMs) * 40
         setProgress(recordingProgress)
         setCurrentStep(`Recording: ${elapsedSeconds.toFixed(1)}s / ${config.duration}s`)
 
@@ -313,7 +393,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
       onError(error instanceof Error ? error.message : "Final video generation failed")
       setIsGenerating(false)
     }
-  }, [config, property, onVideoGenerated, onError, loadImage, drawTikTokCaption])
+  }, [config, property, onVideoGenerated, onError, loadImage, drawTikTokCaption, audioTested, audioReady, testAudio])
 
   const stopGeneration = useCallback(() => {
     if (animationRef.current) {
@@ -335,6 +415,13 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
     setCurrentCaption("")
   }, [])
 
+  // Test audio on mount
+  useState(() => {
+    if (config.audioUrl && !audioTested) {
+      testAudio()
+    }
+  })
+
   return (
     <div className="space-y-4">
       <canvas ref={canvasRef} className="hidden" width={config.format.width} height={config.format.height} />
@@ -345,22 +432,30 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
           <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-6">
             <div className="flex items-center gap-2 mb-3">
               <Volume2 className="h-6 w-6 text-purple-600" />
-              <span className="font-bold text-purple-700 text-lg">Ready for Final Video!</span>
+              <span className="font-bold text-purple-700 text-lg">Rachel Voice Ready!</span>
             </div>
             <div className="text-sm text-purple-600 space-y-2">
-              <p>✅ Rachel (ElevenLabs) voiceover ready</p>
-              <p>✅ {config.images.length} property images loaded</p>
+              <p>✅ Rachel (ElevenLabs) voiceover loaded</p>
+              <p>✅ {config.images.length} property images ready</p>
               <p>✅ {config.captions.length} TikTok-style captions prepared</p>
               <p>✅ {config.duration}s duration with perfect sync</p>
+              {audioReady ? (
+                <p className="text-green-600 font-medium">🎵 Audio tested and ready!</p>
+              ) : audioTested ? (
+                <p className="text-red-600 font-medium">⚠️ Audio test failed</p>
+              ) : (
+                <p className="text-yellow-600 font-medium">🔄 Testing audio...</p>
+              )}
             </div>
           </div>
 
           <Button
             onClick={generateFinalVideo}
+            disabled={!audioReady}
             className="w-full h-14 text-lg font-bold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
           >
             <Play className="mr-3 h-6 w-6" />
-            Generate Final Video
+            Generate Final Video with Rachel
           </Button>
         </div>
       )}
@@ -376,7 +471,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
           </div>
 
           {currentCaption && (
-            <div className="bg-black text-white p-4 rounded-lg text-center">
+            <div className="bg-black text-white p-4 rounded-lg text-center border-2 border-purple-500">
               <p className="font-bold text-lg">{currentCaption}</p>
               <p className="text-xs text-gray-300 mt-1">Live Caption Preview</p>
             </div>
@@ -417,7 +512,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
               asChild
               className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
             >
-              <a href={videoUrl} download="final-property-video.webm">
+              <a href={videoUrl} download="final-property-video-rachel.webm">
                 <Download className="mr-2 h-4 w-4" />
                 Download Final Video
               </a>
