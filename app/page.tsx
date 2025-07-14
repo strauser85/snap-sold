@@ -21,7 +21,7 @@ import {
   RefreshCw,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { CompleteVideoGenerator } from "@/components/complete-video-generator"
+import { SyncedVideoGenerator } from "@/components/synced-video-generator"
 
 interface UploadedImage {
   file: File
@@ -51,17 +51,7 @@ export default function VideoGenerator() {
 
   const MAX_IMAGES = 15
 
-  const videoGenerator = CompleteVideoGenerator({
-    onVideoGenerated: (url) => {
-      setVideoUrl(url)
-      setIsLoading(false)
-      setProgress(100)
-    },
-    onError: (err) => {
-      setError(err)
-      setIsLoading(false)
-    },
-  })
+  const [videoConfig, setVideoConfig] = useState<any>(null)
 
   // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
@@ -258,9 +248,7 @@ export default function VideoGenerator() {
 
       if (data.success) {
         setProgress(50)
-
-        // Use the video generator to create the final video
-        await videoGenerator.generateCompleteVideo(data)
+        setVideoConfig(data) // Store the config for the synced generator
       } else {
         throw new Error("Failed to prepare video data")
       }
@@ -294,10 +282,6 @@ export default function VideoGenerator() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl space-y-8">
-        {/* Hidden canvas and audio for video generation */}
-        <canvas ref={videoGenerator.canvasRef} className="hidden" />
-        <audio ref={videoGenerator.audioRef} className="hidden" />
-
         {/* Header */}
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-2">
@@ -551,6 +535,22 @@ export default function VideoGenerator() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Synced Video Generator */}
+        {videoConfig && !videoUrl && (
+          <SyncedVideoGenerator
+            config={videoConfig}
+            onVideoGenerated={(url) => {
+              setVideoUrl(url)
+              setIsLoading(false)
+              setProgress(100)
+            }}
+            onError={(err) => {
+              setError(err)
+              setIsLoading(false)
+            }}
+          />
+        )}
 
         {/* Clean Progress Bar */}
         {isLoading && (

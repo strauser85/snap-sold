@@ -198,32 +198,28 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
   }
 }
 
-// Fallback word timing estimation
-function generateFallbackWordTimings(words: string[], startTime = 0): WordTiming[] {
+// Generate fallback word timings that sync with actual audio playback
+function generateFallbackWordTimings(words: string[], audioStartDelay = 0.5): WordTiming[] {
   const wordTimings: WordTiming[] = []
-  let currentTime = startTime + 0.3 // Start with small delay
+  let currentTime = audioStartDelay // Wait for audio to actually start
 
-  // Adjust for 0.85x speed
-  const baseWordsPerSecond = 2.0 * 0.85 // 85% speed adjustment
+  // More realistic speech timing for Rachel voice at 0.85x speed
+  const baseWordsPerSecond = 2.2 * 0.85 // Adjusted for slower speech
 
   words.forEach((word, index) => {
-    // Adjust timing based on word characteristics
-    let wordDuration = 0.4 // Base duration per word
+    let wordDuration = 0.45 // Base duration per word
 
-    // Longer words take more time
-    if (word.length > 6) wordDuration += 0.2
-    if (word.length > 10) wordDuration += 0.3
+    // Adjust for word characteristics
+    if (word.length > 6) wordDuration += 0.15
+    if (word.length > 10) wordDuration += 0.25
 
-    // Punctuation adds pause
-    if (word.includes(",")) wordDuration += 0.1
-    if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.3
+    // Punctuation adds natural pauses
+    if (word.includes(",")) wordDuration += 0.15
+    if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4
 
-    // Numbers and special terms take longer
+    // Numbers and property terms need more time
     if (/\d/.test(word)) wordDuration += 0.2
-    if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) wordDuration += 0.1
-
-    // Apply 0.85x speed adjustment
-    wordDuration = wordDuration / 0.85
+    if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) wordDuration += 0.15
 
     wordTimings.push({
       word: word,
@@ -231,7 +227,7 @@ function generateFallbackWordTimings(words: string[], startTime = 0): WordTiming
       endTime: currentTime + wordDuration,
     })
 
-    currentTime += wordDuration + 0.05 // Small gap between words
+    currentTime += wordDuration + 0.08 // Natural gap between words
   })
 
   return wordTimings
@@ -244,10 +240,11 @@ function estimateDuration(script: string): number {
   return Math.max(35, (wordCount / (150 * 0.85)) * 60)
 }
 
-// Generate word-based captions using precise ElevenLabs word timestamps
+// Generate captions that sync with actual audio timing
 function generatePreciseWordCaptions(
   wordTimings: WordTiming[],
   totalDuration: number,
+  audioStartDelay = 0.5,
 ): Array<{
   text: string
   words: WordTiming[]
@@ -273,13 +270,14 @@ function generatePreciseWordCaptions(
           .join(" ")
           .toUpperCase(),
         words: captionWords,
-        startTime: captionWords[0].startTime, // Exact ElevenLabs timing
-        endTime: captionWords[captionWords.length - 1].endTime, // Exact ElevenLabs timing
+        startTime: captionWords[0].startTime, // Already includes audio delay
+        endTime: captionWords[captionWords.length - 1].endTime,
       })
     }
   }
 
-  console.log(`✅ Generated ${captions.length} precise word-based captions`)
+  console.log(`✅ Generated ${captions.length} audio-synced captions`)
+  console.log(`🎵 First caption starts at: ${captions[0]?.startTime.toFixed(2)}s (after audio delay)`)
   return captions
 }
 
@@ -360,7 +358,7 @@ export async function POST(request: NextRequest) {
 
     if (audioResult.wordTimings && audioResult.wordTimings.length > 0 && audioResult.alignmentUsed) {
       console.log("✅ Using precise word-based captions from ElevenLabs timestamps")
-      captions = generatePreciseWordCaptions(audioResult.wordTimings, totalDuration)
+      captions = generatePreciseWordCaptions(audioResult.wordTimings, totalDuration, 0.5)
     } else {
       console.log("⚠️ Falling back to sentence-level captions with estimated timing")
       captions = generateSentenceCaptions(data.script, totalDuration)
