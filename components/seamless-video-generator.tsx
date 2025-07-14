@@ -66,12 +66,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   const animationRef = useRef<number | null>(null)
 
   const [progress, setProgress] = useState(0)
-  const [debugInfo, setDebugInfo] = useState<string[]>([])
-
-  const addDebugInfo = useCallback((info: string) => {
-    console.log("🔧 DEBUG:", info)
-    setDebugInfo((prev) => [...prev.slice(-10), `${new Date().toLocaleTimeString()}: ${info}`])
-  }, [])
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -84,120 +78,117 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   }, [])
 
   // SMART IMAGE PRIORITIZATION AND TIMING
-  const createImageDisplayPlan = useCallback(
-    (imageUrls: string[], totalDuration: number): ImageDisplayPlan[] => {
-      const imageCount = imageUrls.length
-      addDebugInfo(`📸 Planning display for ${imageCount} images over ${totalDuration.toFixed(1)}s`)
+  const createImageDisplayPlan = useCallback((imageUrls: string[], totalDuration: number): ImageDisplayPlan[] => {
+    const imageCount = imageUrls.length
+    console.log(`📸 Planning display for ${imageCount} images over ${totalDuration.toFixed(1)}s`)
 
-      const displayPlan: ImageDisplayPlan[] = []
+    const displayPlan: ImageDisplayPlan[] = []
 
-      if (imageCount < 10) {
-        // UNDER 10 PHOTOS: Extend display time and reuse key images
-        addDebugInfo(`📸 Under 10 photos detected - extending display time and reusing key images`)
+    if (imageCount < 10) {
+      // UNDER 10 PHOTOS: Extend display time and reuse key images
+      console.log(`📸 Under 10 photos detected - extending display time and reusing key images`)
 
-        const baseTimePerImage = totalDuration / Math.max(imageCount, 8) // Minimum 8 image slots
+      const baseTimePerImage = totalDuration / Math.max(imageCount, 8) // Minimum 8 image slots
 
-        // Identify key images (assume first few are most important)
-        const keyImageIndices = [0, 1, 2] // Front, kitchen, living room typically
+      // Identify key images (assume first few are most important)
+      const keyImageIndices = [0, 1, 2] // Front, kitchen, living room typically
 
-        let currentTime = 0
-        let imageIndex = 0
+      let currentTime = 0
+      let imageIndex = 0
 
-        while (currentTime < totalDuration) {
-          const remainingTime = totalDuration - currentTime
-          const remainingSlots = Math.ceil(remainingTime / baseTimePerImage)
-          const timeForThisImage = Math.min(baseTimePerImage, remainingTime)
+      while (currentTime < totalDuration) {
+        const remainingTime = totalDuration - currentTime
+        const remainingSlots = Math.ceil(remainingTime / baseTimePerImage)
+        const timeForThisImage = Math.min(baseTimePerImage, remainingTime)
 
-          const actualImageIndex = imageIndex % imageCount
-          const isReused = imageIndex >= imageCount
+        const actualImageIndex = imageIndex % imageCount
+        const isReused = imageIndex >= imageCount
 
-          displayPlan.push({
-            imageUrl: imageUrls[actualImageIndex],
-            startTime: currentTime,
-            endTime: currentTime + timeForThisImage,
-            duration: timeForThisImage,
-            isReused,
-            priority: keyImageIndices.includes(actualImageIndex) ? 5 : 3,
-          })
-
-          currentTime += timeForThisImage
-          imageIndex++
-
-          if (currentTime >= totalDuration) break
-        }
-      } else if (imageCount >= 20 && imageCount <= 30) {
-        // IDEAL CASE: 20-30 photos, space evenly
-        addDebugInfo(`📸 Ideal photo count (${imageCount}) - spacing evenly`)
-
-        const timePerImage = totalDuration / imageCount
-
-        imageUrls.forEach((url, index) => {
-          displayPlan.push({
-            imageUrl: url,
-            startTime: index * timePerImage,
-            endTime: (index + 1) * timePerImage,
-            duration: timePerImage,
-            isReused: false,
-            priority: 3,
-          })
+        displayPlan.push({
+          imageUrl: imageUrls[actualImageIndex],
+          startTime: currentTime,
+          endTime: currentTime + timeForThisImage,
+          duration: timeForThisImage,
+          isReused,
+          priority: keyImageIndices.includes(actualImageIndex) ? 5 : 3,
         })
-      } else if (imageCount > 30) {
-        // TOO MANY PHOTOS: Prioritize and compress
-        addDebugInfo(`📸 Too many photos (${imageCount}) - prioritizing key images`)
 
-        // Prioritize key images (first 20-25 images, assuming they're ordered by importance)
-        const maxImagesToShow = Math.min(25, Math.floor(totalDuration / 2)) // Min 2s per image
-        const selectedImages = imageUrls.slice(0, maxImagesToShow)
-        const timePerImage = totalDuration / selectedImages.length
+        currentTime += timeForThisImage
+        imageIndex++
 
-        selectedImages.forEach((url, index) => {
-          displayPlan.push({
-            imageUrl: url,
-            startTime: index * timePerImage,
-            endTime: (index + 1) * timePerImage,
-            duration: timePerImage,
-            isReused: false,
-            priority: index < 10 ? 5 : 3, // First 10 are high priority
-          })
-        })
-      } else {
-        // DEFAULT CASE: Space evenly
-        const timePerImage = totalDuration / imageCount
-
-        imageUrls.forEach((url, index) => {
-          displayPlan.push({
-            imageUrl: url,
-            startTime: index * timePerImage,
-            endTime: (index + 1) * timePerImage,
-            duration: timePerImage,
-            isReused: false,
-            priority: 3,
-          })
-        })
+        if (currentTime >= totalDuration) break
       }
+    } else if (imageCount >= 20 && imageCount <= 30) {
+      // IDEAL CASE: 20-30 photos, space evenly
+      console.log(`📸 Ideal photo count (${imageCount}) - spacing evenly`)
 
-      // Log the final plan
-      addDebugInfo(`📸 Final plan: ${displayPlan.length} image slots`)
-      addDebugInfo(`📸 Average time per image: ${(totalDuration / displayPlan.length).toFixed(1)}s`)
-      addDebugInfo(`📸 Reused images: ${displayPlan.filter((p) => p.isReused).length}`)
+      const timePerImage = totalDuration / imageCount
 
-      displayPlan.forEach((plan, index) => {
-        console.log(
-          `📸 Image ${index + 1}: ${plan.duration.toFixed(1)}s ${plan.isReused ? "(REUSED)" : ""} Priority: ${plan.priority}`,
-        )
+      imageUrls.forEach((url, index) => {
+        displayPlan.push({
+          imageUrl: url,
+          startTime: index * timePerImage,
+          endTime: (index + 1) * timePerImage,
+          duration: timePerImage,
+          isReused: false,
+          priority: 3,
+        })
       })
+    } else if (imageCount > 30) {
+      // TOO MANY PHOTOS: Prioritize and compress
+      console.log(`📸 Too many photos (${imageCount}) - prioritizing key images`)
 
-      return displayPlan
-    },
-    [addDebugInfo],
-  )
+      // Prioritize key images (first 20-25 images, assuming they're ordered by importance)
+      const maxImagesToShow = Math.min(25, Math.floor(totalDuration / 2)) // Min 2s per image
+      const selectedImages = imageUrls.slice(0, maxImagesToShow)
+      const timePerImage = totalDuration / selectedImages.length
+
+      selectedImages.forEach((url, index) => {
+        displayPlan.push({
+          imageUrl: url,
+          startTime: index * timePerImage,
+          endTime: (index + 1) * timePerImage,
+          duration: timePerImage,
+          isReused: false,
+          priority: index < 10 ? 5 : 3, // First 10 are high priority
+        })
+      })
+    } else {
+      // DEFAULT CASE: Space evenly
+      const timePerImage = totalDuration / imageCount
+
+      imageUrls.forEach((url, index) => {
+        displayPlan.push({
+          imageUrl: url,
+          startTime: index * timePerImage,
+          endTime: (index + 1) * timePerImage,
+          duration: timePerImage,
+          isReused: false,
+          priority: 3,
+        })
+      })
+    }
+
+    // Log the final plan
+    console.log(`📸 Final plan: ${displayPlan.length} image slots`)
+    console.log(`📸 Average time per image: ${(totalDuration / displayPlan.length).toFixed(1)}s`)
+    console.log(`📸 Reused images: ${displayPlan.filter((p) => p.isReused).length}`)
+
+    displayPlan.forEach((plan, index) => {
+      console.log(
+        `📸 Image ${index + 1}: ${plan.duration.toFixed(1)}s ${plan.isReused ? "(REUSED)" : ""} Priority: ${plan.priority}`,
+      )
+    })
+
+    return displayPlan
+  }, [])
 
   const extractHighlightCaptions = useCallback(
     (script: string, duration: number): HighlightCaption[] => {
       const highlights: HighlightCaption[] = []
       const scriptLower = script.toLowerCase()
 
-      addDebugInfo("🎯 Extracting key highlights from script...")
+      console.log("🎯 Extracting key highlights from script...")
 
       if (scriptLower.includes("attention") || scriptLower.includes("stop") || scriptLower.includes("look")) {
         highlights.push({
@@ -228,14 +219,14 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
                 : `${propertyData.bathrooms} BATHS`
 
       highlights.push({
-        text: `${bedroomText}, ${bathroomText}`,
+        text: `${bedroomText}, ${bathroomText}`.toUpperCase(),
         startTime: duration * 0.15,
         endTime: duration * 0.25,
         priority: 4,
       })
 
       highlights.push({
-        text: `${propertyData.sqft.toLocaleString()} SQ FT OF LUXURY`,
+        text: `${propertyData.sqft.toLocaleString()} SQ FT OF LUXURY`.toUpperCase(),
         startTime: duration * 0.25,
         endTime: duration * 0.35,
         priority: 4,
@@ -258,7 +249,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       highlights.push({
-        text: featureText,
+        text: featureText.toUpperCase(),
         startTime: duration * 0.35,
         endTime: duration * 0.55,
         priority: 3,
@@ -268,7 +259,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const city = locationParts.length > 1 ? locationParts[1].trim().toUpperCase() : "PRIME LOCATION"
 
       highlights.push({
-        text: `📍 ${city} – PRIME LOCATION`,
+        text: `📍 ${city} – PRIME LOCATION`.toUpperCase(),
         startTime: duration * 0.55,
         endTime: duration * 0.7,
         priority: 3,
@@ -280,7 +271,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           : `$${(propertyData.price / 1000).toFixed(0)}K – WON'T LAST LONG`
 
       highlights.push({
-        text: priceText,
+        text: priceText.toUpperCase(),
         startTime: duration * 0.7,
         endTime: duration * 0.85,
         priority: 5,
@@ -309,50 +300,58 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         })
       }
 
-      addDebugInfo(`✅ Created ${highlights.length} highlight captions`)
+      console.log(`✅ Created ${highlights.length} highlight captions`)
       highlights.forEach((h, i) => {
-        addDebugInfo(`   ${i + 1}. "${h.text}" (${h.startTime.toFixed(1)}s - ${h.endTime.toFixed(1)}s)`)
+        console.log(`   ${i + 1}. "${h.text}" (${h.startTime.toFixed(1)}s - ${h.endTime.toFixed(1)}s)`)
       })
 
       return highlights
     },
-    [propertyData, addDebugInfo],
+    [propertyData],
   )
 
   // SMART CAPTION RENDERING WITH AUTO-SCALING
   const calculateCaptionRenderInfo = useCallback(
     (ctx: CanvasRenderingContext2D, text: string, canvas: HTMLCanvasElement, priority: number): CaptionRenderInfo => {
-      const maxWidth = canvas.width * 0.9 // 90% of video width
-      const bottomPadding = canvas.height * 0.08 // 8% padding from bottom
+      // Ensure text is uppercase for consistent measurement
+      const displayText = text.toUpperCase()
 
-      // Base font size based on priority and text length
-      let baseFontSize = Math.floor(canvas.width * 0.09)
-      if (priority >= 5) baseFontSize = Math.floor(canvas.width * 0.11)
-      if (text.length > 25) baseFontSize = Math.floor(canvas.width * 0.07)
-      if (text.length > 40) baseFontSize = Math.floor(canvas.width * 0.06)
+      const maxWidth = canvas.width * 0.9 // 90% of video width
+      const bottomPadding = canvas.height * 0.1 // 10% padding from bottom for consistent placement
+
+      // Consistent base font size calculation
+      let baseFontSize = Math.floor(canvas.width * 0.08) // Slightly smaller base for consistency
+
+      // Priority-based sizing adjustments
+      if (priority >= 5) baseFontSize = Math.floor(canvas.width * 0.095) // High priority slightly larger
+      if (priority <= 2) baseFontSize = Math.floor(canvas.width * 0.07) // Low priority slightly smaller
+
+      // Length-based adjustments
+      if (displayText.length > 30) baseFontSize = Math.floor(canvas.width * 0.065)
+      if (displayText.length > 45) baseFontSize = Math.floor(canvas.width * 0.055)
 
       let fontSize = baseFontSize
       let autoScaled = false
 
       // Test if text fits at base size
       ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
-      let textWidth = ctx.measureText(text).width
+      let textWidth = ctx.measureText(displayText).width
 
       // Auto-scale down if too wide
       while (textWidth > maxWidth && fontSize > canvas.width * 0.04) {
         fontSize -= 2
         ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
-        textWidth = ctx.measureText(text).width
+        textWidth = ctx.measureText(displayText).width
         autoScaled = true
       }
 
       // Smart line breaking
-      const words = text.split(" ")
+      const words = displayText.split(" ")
       const lines: string[] = []
 
       if (textWidth <= maxWidth) {
         // Single line fits
-        lines.push(text)
+        lines.push(displayText)
       } else {
         // Multi-line breaking
         let currentLine = ""
@@ -385,7 +384,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         }
       }
 
-      // Calculate positioning
+      // Consistent positioning calculation
       const lineHeight = fontSize * 1.3
       const totalTextHeight = lines.length * lineHeight
       const startY = canvas.height - bottomPadding - totalTextHeight + lineHeight * 0.8
@@ -393,7 +392,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       return {
         fontSize,
         lines,
-        x: canvas.width / 2,
+        x: canvas.width / 2, // Always center horizontally
         y: startY,
         autoScaled,
         maxWidth,
@@ -405,6 +404,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   const drawHighlightCaption = useCallback(
     (ctx: CanvasRenderingContext2D, caption: HighlightCaption, canvas: HTMLCanvasElement, currentTime: number) => {
       const { text, startTime, endTime, priority } = caption
+
+      // Ensure text is always uppercase
+      const displayText = text.toUpperCase()
 
       // Calculate opacity with fade in/out
       let opacity = 1
@@ -418,23 +420,21 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       if (opacity <= 0) return
 
       // Get smart rendering info
-      const renderInfo = calculateCaptionRenderInfo(ctx, text, canvas, priority)
+      const renderInfo = calculateCaptionRenderInfo(ctx, displayText, canvas, priority)
 
-      // Debug logging
-      addDebugInfo(
-        `📝 Caption: "${text.substring(0, 20)}..." Font: ${renderInfo.fontSize}px ${renderInfo.autoScaled ? "(AUTO-SCALED)" : ""} Lines: ${renderInfo.lines.length}`,
-      )
-
-      // Set font
+      // Set consistent font styling
       ctx.font = `900 ${renderInfo.fontSize}px "Arial Black", Arial, sans-serif`
       ctx.textAlign = "center"
 
-      // Draw each line
+      // Draw each line with consistent styling
       renderInfo.lines.forEach((line, lineIndex) => {
         const y = renderInfo.y + lineIndex * (renderInfo.fontSize * 1.3)
 
+        // Ensure line is uppercase
+        const displayLine = line.toUpperCase()
+
         // Background box for readability
-        const textMetrics = ctx.measureText(line)
+        const textMetrics = ctx.measureText(displayLine)
         const textWidth = textMetrics.width
         const padding = renderInfo.fontSize * 0.6
         const boxWidth = textWidth + padding * 2
@@ -442,47 +442,35 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         const boxX = (canvas.width - boxWidth) / 2
         const boxY = y - renderInfo.fontSize * 0.9
 
-        // Semi-transparent black background
+        // Consistent semi-transparent black background
         ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * opacity})`
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
-        // Multiple stroke layers for depth
+        // Primary black stroke for depth
         ctx.strokeStyle = `rgba(0, 0, 0, ${opacity})`
         ctx.lineWidth = Math.floor(renderInfo.fontSize * 0.2)
-        ctx.strokeText(line, renderInfo.x, y)
+        ctx.strokeText(displayLine, renderInfo.x, y)
 
-        // Secondary shadow
+        // Secondary shadow stroke
         ctx.strokeStyle = `rgba(0, 0, 0, ${0.7 * opacity})`
         ctx.lineWidth = Math.floor(renderInfo.fontSize * 0.1)
-        ctx.strokeText(line, renderInfo.x + 3, y + 3)
+        ctx.strokeText(displayLine, renderInfo.x + 3, y + 3)
 
-        // Main bright yellow text
+        // CONSISTENT BRIGHT YELLOW TEXT - This is the main text color
         ctx.fillStyle = `rgba(255, 255, 0, ${opacity})`
-        ctx.fillText(line, renderInfo.x, y)
+        ctx.fillText(displayLine, renderInfo.x, y)
 
-        // High priority glow effect
+        // High priority glow effect (optional enhancement)
         if (priority >= 4) {
-          ctx.shadowColor = `rgba(255, 255, 0, ${0.5 * opacity})`
-          ctx.shadowBlur = 10
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.8 * opacity})`
-          ctx.fillText(line, renderInfo.x, y)
+          ctx.shadowColor = `rgba(255, 255, 0, ${0.3 * opacity})`
+          ctx.shadowBlur = 8
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.6 * opacity})`
+          ctx.fillText(displayLine, renderInfo.x, y)
           ctx.shadowBlur = 0
         }
       })
-
-      // Debug overlay (only during development)
-      if (process.env.NODE_ENV === "development") {
-        ctx.strokeStyle = `rgba(255, 0, 0, ${0.3 * opacity})`
-        ctx.lineWidth = 1
-        ctx.strokeRect(
-          renderInfo.x - renderInfo.maxWidth / 2,
-          renderInfo.y - renderInfo.fontSize,
-          renderInfo.maxWidth,
-          renderInfo.lines.length * renderInfo.fontSize * 1.3,
-        )
-      }
     },
-    [calculateCaptionRenderInfo, addDebugInfo],
+    [calculateCaptionRenderInfo],
   )
 
   const generateAudio = useCallback(
@@ -518,7 +506,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.width = 576
       canvas.height = 1024
 
-      addDebugInfo("🎬 Starting SMART video generation with dynamic image timing")
+      console.log("🎬 Starting SMART video generation with dynamic image timing")
 
       const audioData = await generateAudio(propertyData.script)
       setProgress(20)
@@ -527,7 +515,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("Failed to generate audio")
       }
 
-      addDebugInfo(`🎵 Audio duration: ${audioData.duration}s`)
+      console.log(`🎵 Audio duration: ${audioData.duration}s`)
 
       // Create smart image display plan
       const imageDisplayPlan = createImageDisplayPlan(propertyData.imageUrls, audioData.duration)
@@ -541,7 +529,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       await new Promise((resolve, reject) => {
         audio.oncanplaythrough = () => {
-          addDebugInfo("✅ Audio loaded and ready at FULL VOLUME")
+          console.log("✅ Audio loaded and ready at FULL VOLUME")
           resolve(null)
         }
         audio.onerror = reject
@@ -564,7 +552,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           loadedImages[uniqueImageUrls[i]] = img
           setProgress(40 + (i / uniqueImageUrls.length) * 20)
         } catch (error) {
-          addDebugInfo(`⚠️ Failed to load image ${i + 1}: ${error}`)
+          console.warn(`⚠️ Failed to load image ${i + 1}: ${error}`)
         }
       }
 
@@ -572,7 +560,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("No images could be loaded")
       }
 
-      addDebugInfo(`✅ Loaded ${Object.keys(loadedImages).length} unique images`)
+      console.log(`✅ Loaded ${Object.keys(loadedImages).length} unique images`)
 
       setProgress(60)
 
@@ -612,7 +600,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       mediaRecorder.onstop = async () => {
-        addDebugInfo(`🏁 Recording complete: ${chunksRef.current.length} chunks`)
+        console.log(`🏁 Recording complete: ${chunksRef.current.length} chunks`)
 
         try {
           await audioContext.close()
@@ -631,7 +619,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
             type: "video/webm",
           })
 
-          addDebugInfo(`✅ SMART video created: ${videoBlob.size} bytes with optimized image timing`)
+          console.log(`✅ SMART video created: ${videoBlob.size} bytes with optimized image timing`)
 
           const videoUrl = URL.createObjectURL(videoBlob)
           setProgress(100)
@@ -650,7 +638,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(75)
 
-      addDebugInfo("🎬 Starting SYNCHRONIZED recording with smart image timing...")
+      console.log("🎬 Starting SYNCHRONIZED recording with smart image timing...")
 
       mediaRecorder.start(100)
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -658,7 +646,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       audio.currentTime = 0
       await audio.play()
 
-      addDebugInfo("🎵 Audio and video recording started SIMULTANEOUSLY")
+      console.log("🎵 Audio and video recording started SIMULTANEOUSLY")
 
       const recordingStartTime = Date.now()
       const durationMs = audioData.duration * 1000
@@ -668,7 +656,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         const elapsedSeconds = elapsed / 1000
 
         if (elapsed >= durationMs) {
-          addDebugInfo("🏁 Animation complete - stopping recording")
+          console.log("🏁 Animation complete - stopping recording")
           audio.pause()
           mediaRecorder.stop()
           return
@@ -747,7 +735,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     drawHighlightCaption,
     onVideoGenerated,
     onError,
-    addDebugInfo,
   ])
 
   useEffect(() => {
@@ -760,28 +747,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       <audio ref={audioRef} preload="auto" className="hidden" />
 
       <div className="bg-white/80 backdrop-blur-sm border rounded-lg p-6 shadow-lg">
-        <div className="space-y-4">
-          <div className="text-center">
-            <div className="text-3xl font-bold text-gray-700 mb-4">{Math.round(progress)}%</div>
-            <Progress value={progress} className="h-4" />
-            <p className="text-sm text-gray-500 mt-2">
-              Generating SMART video with dynamic image timing and auto-scaling captions
-            </p>
-          </div>
-
-          {/* Debug Info Panel */}
-          {debugInfo.length > 0 && (
-            <details className="text-left">
-              <summary className="text-sm text-gray-600 cursor-pointer">Show Debug Info</summary>
-              <div className="bg-gray-50 border rounded-lg p-3 mt-2 max-h-60 overflow-y-auto">
-                {debugInfo.map((info, index) => (
-                  <p key={index} className="text-xs text-gray-600 font-mono">
-                    {info}
-                  </p>
-                ))}
-              </div>
-            </details>
-          )}
+        <div className="text-center">
+          <div className="text-4xl font-bold text-gray-700 mb-6">{Math.round(progress)}%</div>
+          <Progress value={progress} className="h-6" />
         </div>
       </div>
     </div>
