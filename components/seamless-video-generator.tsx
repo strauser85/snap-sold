@@ -2,8 +2,6 @@
 
 import { useRef, useState, useCallback, useEffect } from "react"
 import { Progress } from "@/components/ui/progress"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2 } from "lucide-react"
 
 interface PropertyData {
   address: string
@@ -97,7 +95,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     }))
   }, [])
 
-  // Create natural captions
   const createNaturalCaptions = useCallback((wordTimings: WordTiming[]): CaptionChunk[] => {
     const captions: CaptionChunk[] = []
     let currentPhrase: WordTiming[] = []
@@ -118,10 +115,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       ) {
         if (currentPhrase.length > 0) {
           captions.push({
-            text: currentPhrase
-              .map((w) => w.word)
-              .join(" ")
-              .toUpperCase(),
+            text: currentPhrase.map((w) => w.word).join(" "), // Keep original punctuation, don't convert to uppercase
             words: [...currentPhrase],
             startTime: currentPhrase[0].startTime,
             endTime: currentPhrase[currentPhrase.length - 1].endTime,
@@ -133,10 +127,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
     if (currentPhrase.length > 0) {
       captions.push({
-        text: currentPhrase
-          .map((w) => w.word)
-          .join(" ")
-          .toUpperCase(),
+        text: currentPhrase.map((w) => w.word).join(" "), // Keep original punctuation
         words: [...currentPhrase],
         startTime: currentPhrase[0].startTime,
         endTime: currentPhrase[currentPhrase.length - 1].endTime,
@@ -211,7 +202,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   // Generate ElevenLabs audio
   const generateAudio = useCallback(
     async (script: string) => {
-      setCurrentStep("Generating Rachel voiceover...")
       setProgress(10)
 
       const response = await fetch("/api/generate-complete-video", {
@@ -255,7 +245,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       // Step 2: Setup audio
-      setCurrentStep("Setting up audio...")
       const audio = audioRef.current!
       audio.src = audioData.audioUrl
       audio.preload = "auto"
@@ -270,13 +259,12 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       setProgress(30)
 
       // Step 3: Create timing data
-      setCurrentStep("Creating caption timing...")
+      setProgress(40)
       const wordTimings = createNaturalWordTimings(propertyData.script, audioData.duration)
       const naturalCaptions = createNaturalCaptions(wordTimings)
-      setProgress(40)
 
       // Step 4: Load images
-      setCurrentStep("Loading property images...")
+      setProgress(40)
       const loadedImages: HTMLImageElement[] = []
       for (let i = 0; i < propertyData.imageUrls.length; i++) {
         try {
@@ -294,43 +282,63 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(60)
 
-      // Step 5: Setup recording
-      setCurrentStep("Setting up video recording...")
+      // Step 5: Setup recording with FIXED audio embedding
+      setProgress(70)
 
       // Create canvas stream
       const canvasStream = canvas.captureStream(30)
 
-      // Setup Web Audio API for proper audio muxing
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-      audioContextRef.current = audioContext
+      // Create a new MediaStream that will contain both video and audio
+      const finalStream = new MediaStream()
 
-      const audioSource = audioContext.createMediaElementSource(audio)
-      const audioDestination = audioContext.createMediaStreamDestination()
+      // Add video track from canvas
+      canvasStream.getVideoTracks().forEach((track) => {
+        finalStream.addTrack(track)
+      })
 
-      // Connect audio for muxing (no speakers during generation)
-      audioSource.connect(audioDestination)
+      // Create audio stream using MediaElementAudioSourceNode
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        audioContextRef.current = audioContext
 
-      // Combine streams
-      const combinedStream = new MediaStream()
-      canvasStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track))
-      audioDestination.stream.getAudioTracks().forEach((track) => combinedStream.addTrack(track))
+        // Create audio source and destination
+        const source = audioContext.createMediaElementSource(audio)
+        const destination = audioContext.createMediaStreamDestination()
 
-      // Setup MediaRecorder with fallback options
-      let options = { mimeType: "video/webm;codecs=vp9,opus", videoBitsPerSecond: 2500000, audioBitsPerSecond: 128000 }
+        // Connect source to destination (this creates the audio stream)
+        source.connect(destination)
 
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: "video/webm;codecs=vp8,opus", videoBitsPerSecond: 2500000, audioBitsPerSecond: 128000 }
+        // Add audio track to final stream
+        destination.stream.getAudioTracks().forEach((track) => {
+          finalStream.addTrack(track)
+        })
+
+        console.log(`🎵 Audio tracks added: ${finalStream.getAudioTracks().length}`)
+      } catch (audioError) {
+        console.error("Audio setup failed:", audioError)
+        // Continue without audio if setup fails
       }
 
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: "video/webm", videoBitsPerSecond: 2500000, audioBitsPerSecond: 128000 }
+      // Use the most compatible format for audio
+      let options = {
+        mimeType: "video/webm;codecs=vp8,opus",
+        videoBitsPerSecond: 2000000,
+        audioBitsPerSecond: 128000,
       }
 
-      const mediaRecorder = new MediaRecorder(combinedStream, options)
+      // Fallback if not supported
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options = {
+          mimeType: "video/webm",
+          videoBitsPerSecond: 2000000,
+          audioBitsPerSecond: 128000,
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(finalStream, options)
+
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
-
-      setProgress(70)
 
       // Setup recording handlers
       mediaRecorder.ondataavailable = (event) => {
@@ -354,7 +362,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
             throw new Error("No video data recorded")
           }
 
-          setCurrentStep("Creating final MP4...")
           setProgress(95)
 
           // Create video blob with proper MIME type
@@ -369,7 +376,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
           console.log(`✅ Video created: ${videoBlob.size} bytes with embedded audio`)
           setProgress(100)
-          setCurrentStep("Video generation complete!")
 
           onVideoGenerated(videoUrl)
         } catch (error) {
@@ -384,7 +390,6 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       // Step 6: Start recording
-      setCurrentStep("Generating PERFECT video with embedded audio... Please wait.")
       setProgress(75)
 
       mediaRecorder.start(100)
@@ -501,17 +506,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       <div className="bg-white/80 backdrop-blur-sm border rounded-lg p-6 shadow-lg">
         <div className="space-y-4">
           <div className="text-center">
-            <div className="text-3xl font-bold text-gray-700 mb-2">{Math.round(progress)}%</div>
-            <div className="text-sm text-gray-600 mb-4">{currentStep}</div>
+            <div className="text-3xl font-bold text-gray-700 mb-4">{Math.round(progress)}%</div>
             <Progress value={progress} className="h-4" />
           </div>
-
-          <Alert>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <AlertDescription>
-              Creating your professional property video with Rachel voiceover and synchronized captions...
-            </AlertDescription>
-          </Alert>
         </div>
       </div>
     </div>
