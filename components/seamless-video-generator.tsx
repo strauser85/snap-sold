@@ -52,7 +52,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     })
   }, [])
 
-  // Generate natural word timings
+  // Generate natural word timings with better audio sync
   const createNaturalWordTimings = useCallback((script: string, totalDuration: number): WordTiming[] => {
     const words = script
       .replace(/[^\w\s.,!?'-]/g, " ")
@@ -62,17 +62,17 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       .filter((word) => word.length > 0)
 
     const wordTimings: WordTiming[] = []
-    let currentTime = 0.5
+    let currentTime = 0.3 // Reduced initial delay to sync better with audio
 
     words.forEach((word) => {
-      let wordDuration = 0.35
+      let wordDuration = 0.4 // Slightly increased base duration
 
-      if (word.length > 6) wordDuration += 0.15
-      if (word.length > 10) wordDuration += 0.2
-      if (word.includes(",")) wordDuration += 0.2
-      if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4
-      if (/\d/.test(word)) wordDuration += 0.15
-      if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) wordDuration += 0.1
+      if (word.length > 6) wordDuration += 0.1
+      if (word.length > 10) wordDuration += 0.15
+      if (word.includes(",")) wordDuration += 0.15
+      if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.3
+      if (/\d/.test(word)) wordDuration += 0.1
+      if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) wordDuration += 0.05
 
       wordTimings.push({
         word: word,
@@ -80,11 +80,11 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         endTime: currentTime + wordDuration,
       })
 
-      currentTime += wordDuration + 0.05
+      currentTime += wordDuration + 0.03 // Reduced gap between words
     })
 
     const totalCalculatedTime = currentTime
-    const scaleFactor = (totalDuration - 1) / totalCalculatedTime
+    const scaleFactor = (totalDuration - 0.5) / totalCalculatedTime // Better scaling
 
     return wordTimings.map((timing) => ({
       ...timing,
@@ -219,7 +219,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     [propertyData],
   )
 
-  // Main generation function with FIXED audio embedding
+  // Main generation function with SILENT audio embedding
   const generateCompleteVideo = useCallback(async () => {
     try {
       if (!canvasRef.current) {
@@ -232,7 +232,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.width = 576
       canvas.height = 1024
 
-      console.log("🎬 Starting video generation with PROPER audio embedding")
+      console.log("🎬 Starting SILENT video generation with embedded audio")
 
       // Step 1: Generate audio
       const audioData = await generateAudio(propertyData.script)
@@ -242,11 +242,13 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("Failed to generate audio")
       }
 
-      // Step 2: Setup audio element
+      // Step 2: Setup audio element (MUTED for silent generation)
       const audio = audioRef.current!
       audio.src = audioData.audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
+      audio.muted = true // MUTED during generation
+      audio.volume = 0 // Extra safety - set volume to 0
 
       await new Promise((resolve, reject) => {
         audio.oncanplaythrough = resolve
@@ -279,26 +281,24 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(60)
 
-      // Step 5: Setup recording with PROPER audio capture
-      console.log("🎵 Setting up PROPER audio capture...")
+      // Step 5: Setup SILENT audio capture
+      console.log("🔇 Setting up SILENT audio capture...")
 
       // Create canvas stream
       const canvasStream = canvas.captureStream(30)
 
-      // Create audio context and capture audio properly
+      // Create audio context for SILENT capture
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
 
-      // Create audio source from the audio element
+      // Create audio source from the MUTED audio element
       const audioSource = audioContext.createMediaElementSource(audio)
 
       // Create destination for capturing audio
       const audioDestination = audioContext.createMediaStreamDestination()
 
-      // Connect audio source to destination (this captures the audio)
+      // Connect audio source ONLY to destination (NOT to speakers)
       audioSource.connect(audioDestination)
-
-      // IMPORTANT: Also connect to speakers so we can hear it during generation
-      audioSource.connect(audioContext.destination)
+      // DO NOT connect to audioContext.destination - this prevents audio playback
 
       // Create combined stream with both video and audio
       const combinedStream = new MediaStream()
@@ -308,18 +308,18 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         combinedStream.addTrack(track)
       })
 
-      // Add audio track
+      // Add audio track (will be silent during generation but embedded in video)
       audioDestination.stream.getAudioTracks().forEach((track) => {
         combinedStream.addTrack(track)
       })
 
-      console.log(`🎵 Combined stream tracks: ${combinedStream.getTracks().length}`)
+      console.log(`🔇 SILENT combined stream tracks: ${combinedStream.getTracks().length}`)
       console.log(`📹 Video tracks: ${combinedStream.getVideoTracks().length}`)
-      console.log(`🔊 Audio tracks: ${combinedStream.getAudioTracks().length}`)
+      console.log(`🔊 Audio tracks (silent): ${combinedStream.getAudioTracks().length}`)
 
       // Use MediaRecorder with the combined stream
       const mediaRecorder = new MediaRecorder(combinedStream, {
-        mimeType: "video/webm;codecs=vp8,opus", // VP8 + Opus for better compatibility
+        mimeType: "video/webm;codecs=vp8,opus",
         videoBitsPerSecond: 2000000,
         audioBitsPerSecond: 128000,
       })
@@ -354,12 +354,12 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
           setProgress(95)
 
-          // Create video blob
+          // Create video blob with embedded audio
           const videoBlob = new Blob(chunksRef.current, {
             type: "video/webm",
           })
 
-          console.log(`✅ Video blob created: ${videoBlob.size} bytes`)
+          console.log(`✅ SILENT video blob created: ${videoBlob.size} bytes with embedded audio`)
 
           if (videoBlob.size === 0) {
             throw new Error("Generated video file is empty")
@@ -380,18 +380,19 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         onError("Recording failed - please try again")
       }
 
-      // Step 6: Start recording
+      // Step 6: Start SILENT recording
       setProgress(75)
 
-      console.log("🎬 Starting MediaRecorder...")
-      mediaRecorder.start(100) // Record in small chunks
+      console.log("🎬 Starting SILENT MediaRecorder...")
+      mediaRecorder.start(100)
 
-      // Start audio playback (NOT muted - we need the audio to be captured)
+      // Start MUTED audio playback (for timing sync only - NO SOUND)
       audio.currentTime = 0
-      audio.muted = false // IMPORTANT: Don't mute the audio!
+      audio.muted = true // Ensure it stays muted
+      audio.volume = 0 // Double ensure no sound
       await audio.play()
 
-      console.log("🎵 Audio playback started (unmuted for capture)")
+      console.log("🔇 MUTED audio playback started (silent - for timing only)")
 
       // Animation loop
       const startTime = Date.now()
@@ -403,7 +404,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         const elapsedSeconds = elapsed / 1000
 
         if (elapsed >= durationMs) {
-          console.log("🏁 Animation complete - stopping recording")
+          console.log("🏁 Animation complete - stopping SILENT recording")
           audio.pause()
           mediaRecorder.stop()
           return
@@ -472,7 +473,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       animate()
     } catch (error) {
-      console.error("❌ Video generation failed:", error)
+      console.error("❌ SILENT video generation failed:", error)
       onError(error instanceof Error ? error.message : "Video generation failed")
     }
   }, [
@@ -501,6 +502,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           <div className="text-center">
             <div className="text-3xl font-bold text-gray-700 mb-4">{Math.round(progress)}%</div>
             <Progress value={progress} className="h-4" />
+            <p className="text-sm text-gray-500 mt-2">Generating video silently - audio will be in final MP4</p>
           </div>
         </div>
       </div>

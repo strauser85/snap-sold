@@ -114,7 +114,7 @@ function sanitizeGeneratedScript(script: string): string {
   return cleaned
 }
 
-// Fallback script templates for when AI fails (emoji-free)
+// Fallback script templates with perfect grammar and no abbreviations
 const generateFallbackScript = (data: PropertyData): string => {
   const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount = 1 } = data
 
@@ -125,23 +125,23 @@ const generateFallbackScript = (data: PropertyData): string => {
   }).format(price)
 
   const hooks = [
-    "STOP SCROLLING! This property is about to BLOW YOUR MIND!",
-    "You need to see this house! This is why I LOVE real estate!",
-    "Want to see a MILLION DOLLAR opportunity? Look at this!",
-    "This house is absolutely STUNNING! Here's why you need to see it.",
-    "ATTENTION home buyers! This property won't last long!",
+    "Stop scrolling! This property is about to blow your mind!",
+    "You need to see this house! This is why I love real estate!",
+    "Want to see a million dollar opportunity? Look at this!",
+    "This house is absolutely stunning! Here is why you need to see it.",
+    "Attention home buyers! This property will not last long!",
   ]
 
   const midSections = [
-    `We've got ${bedrooms} spacious bedrooms and ${bathrooms} beautiful bathrooms spread across ${sqft.toLocaleString()} square feet of pure luxury!`,
-    `${bedrooms} beds, ${bathrooms} baths, and ${sqft.toLocaleString()} square feet of absolute perfection!`,
+    `We have ${bedrooms} spacious bedrooms and ${bathrooms} beautiful bathrooms spread across ${sqft.toLocaleString()} square feet of pure luxury!`,
+    `${bedrooms} bedrooms, ${bathrooms} bathrooms, and ${sqft.toLocaleString()} square feet of absolute perfection!`,
     `This ${bedrooms}-bedroom, ${bathrooms}-bathroom masterpiece offers ${sqft.toLocaleString()} square feet of dream living!`,
   ]
 
   const endings = [
-    "Don't let this opportunity slip away! DM me NOW!",
-    "This won't last long at this price! Contact me TODAY!",
-    "Ready to make this YOUR home? Let's talk!",
+    "Do not let this opportunity slip away! Direct message me now!",
+    "This will not last long at this price! Contact me today!",
+    "Ready to make this your home? Let us talk!",
     "Investment opportunity of a lifetime! Call me!",
   ]
 
@@ -155,7 +155,7 @@ const generateFallbackScript = (data: PropertyData): string => {
 
   // Include property description if provided
   if (propertyDescription && propertyDescription.trim()) {
-    script += `But wait, there's more! ${propertyDescription.trim()}\n\n`
+    script += `But wait, there is more! ${propertyDescription.trim()}\n\n`
   }
 
   script += `Priced at ${priceFormatted}, this property is an incredible opportunity! `
@@ -166,11 +166,11 @@ const generateFallbackScript = (data: PropertyData): string => {
 
   script += `${ending}`
 
-  // Apply sanitization filter to fallback script
-  return sanitizeScript(script)
+  // Apply grammar fixes to fallback script too
+  return sanitizeAndFixGrammar(script)
 }
 
-// OpenAI API function with updated prompt
+// OpenAI API function with improved prompt for perfect grammar and no abbreviations
 async function generateOpenAIScript(propertyData: PropertyData): Promise<string> {
   const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount = 1 } = propertyData
 
@@ -185,34 +185,42 @@ async function generateOpenAIScript(propertyData: PropertyData): Promise<string>
       messages: [
         {
           role: "system",
-          content: `You are a top real estate marketing expert who creates viral TikTok scripts. Create engaging, persuasive voiceover scripts for property videos.
+          content: `You are a professional real estate marketing expert who creates viral TikTok scripts with PERFECT grammar and NO abbreviations.
 
-CRITICAL CHARACTER RESTRICTIONS - FOLLOW EXACTLY:
-- Do not include emojis, special characters, smart quotes, or any non-ASCII symbols
-- Use ONLY standard ASCII characters (letters, numbers, basic punctuation)
-- Use ONLY these punctuation marks: . , ! ? ' " - ( )
-- NO Unicode symbols, emojis, or decorative characters whatsoever
-- NO smart quotes, em-dashes, or special formatting
-- Write "dollars" instead of "$", "and" instead of "&"
-- Use plain English words only
+CRITICAL WRITING RULES - FOLLOW EXACTLY:
+- Use PERFECT grammar, spelling, and punctuation
+- NEVER use abbreviations (write "bedrooms" not "BR", "bathrooms" not "BA", "square feet" not "sqft")
+- Write out ALL numbers as words when under 10 (write "three" not "3")
+- Use complete sentences with proper structure
+- No emojis, special characters, or symbols
+- Use "dollars" instead of "$" symbol
+- Write "and" instead of "&" symbol
+- Use proper capitalization and sentence structure
+- Every sentence must be grammatically perfect
 
 SCRIPT REQUIREMENTS:
-- Hook viewers in the first 3 seconds with compelling statements
-- Use urgency and scarcity tactics
+- Hook viewers in first 3 seconds with compelling opening
+- Use urgency and scarcity language naturally
 - Highlight key selling points and lifestyle benefits
 - Include emotional triggers and investment potential
 - Reference property features for ${imageCount} images
 - Incorporate custom property descriptions naturally
 - End with strong call-to-action
 - 45-60 seconds when spoken (150-200 words)
-- Casual, energetic TikTok language
+- Energetic but professional TikTok language
 - Create anticipation for room reveals
 
-REMEMBER: Use ONLY plain ASCII text. Absolutely NO emojis, symbols, or special characters.`,
+GRAMMAR EXAMPLES:
+- Write "This three-bedroom, two-bathroom home" not "This 3BR/2BA home"
+- Write "two thousand five hundred square feet" not "2500 sqft"
+- Write "five hundred thousand dollars" not "$500K"
+- Write "Do not miss this opportunity" not "Don't miss this"
+
+Create a script with PERFECT grammar and NO abbreviations whatsoever.`,
         },
         {
           role: "user",
-          content: `Create a viral TikTok voiceover script for this property with ${imageCount} images. Use ONLY plain English text with standard punctuation - NO emojis or special characters.
+          content: `Create a viral TikTok voiceover script with PERFECT grammar and NO abbreviations for this property with ${imageCount} images.
 
 Address: ${address}
 Price: $${price.toLocaleString()}
@@ -226,15 +234,24 @@ ${
     ? `IMPORTANT - Custom Property Features to Highlight:
 ${propertyDescription.trim()}
 
-Please incorporate these specific features and details naturally into the script to emphasize what makes this property special.`
+Please incorporate these specific features naturally into the script with perfect grammar.`
     : ""
 }
 
-Make it compelling for potential buyers and investors with hooks, benefits, urgency, and strong call-to-action. Use ONLY plain text - absolutely NO emojis, symbols, or special characters.`,
+Requirements:
+- Use PERFECT grammar and complete sentences
+- Write "bedrooms" and "bathrooms" in full (never BR/BA)
+- Write numbers under 10 as words
+- Write "dollars" instead of using $ symbol
+- No abbreviations or shortened forms
+- Professional but energetic tone
+- Strong hook and call-to-action
+
+Make it compelling for buyers and investors with perfect grammar throughout.`,
         },
       ],
-      max_tokens: 500,
-      temperature: 0.8,
+      max_tokens: 600,
+      temperature: 0.7,
     }),
   })
 
@@ -246,11 +263,84 @@ Make it compelling for potential buyers and investors with hooks, benefits, urge
   const data = await response.json()
   const rawScript = data.choices[0].message.content.trim()
 
-  // Apply comprehensive sanitization
-  const sanitizedScript = sanitizeScript(rawScript)
+  // Apply comprehensive sanitization and grammar fixes
+  const sanitizedScript = sanitizeAndFixGrammar(rawScript)
 
-  console.log("🧹 Script sanitized for TTS safety")
+  console.log("🧹 Script sanitized and grammar-checked")
   return sanitizedScript
+}
+
+// Enhanced sanitization with grammar fixes
+function sanitizeAndFixGrammar(text: string): string {
+  console.log("🧹 Applying grammar fixes and sanitization...")
+
+  let cleaned = sanitizeScript(text)
+
+  // Fix common abbreviations that might slip through
+  cleaned = cleaned
+    .replace(/\bBR\b/g, "bedrooms")
+    .replace(/\bBA\b/g, "bathrooms")
+    .replace(/\bsqft\b/gi, "square feet")
+    .replace(/\bsq ft\b/gi, "square feet")
+    .replace(/\bsq\. ft\./gi, "square feet")
+    .replace(/\bK\b/g, "thousand")
+    .replace(/\$(\d+)K/g, "$1 thousand dollars")
+    .replace(/\$(\d+)M/g, "$1 million dollars")
+
+  // Fix contractions for more formal speech
+  cleaned = cleaned
+    .replace(/don't/gi, "do not")
+    .replace(/won't/gi, "will not")
+    .replace(/can't/gi, "cannot")
+    .replace(/isn't/gi, "is not")
+    .replace(/aren't/gi, "are not")
+    .replace(/wasn't/gi, "was not")
+    .replace(/weren't/gi, "were not")
+    .replace(/hasn't/gi, "has not")
+    .replace(/haven't/gi, "have not")
+    .replace(/hadn't/gi, "had not")
+    .replace(/doesn't/gi, "does not")
+    .replace(/didn't/gi, "did not")
+    .replace(/shouldn't/gi, "should not")
+    .replace(/wouldn't/gi, "would not")
+    .replace(/couldn't/gi, "could not")
+    .replace(/you're/gi, "you are")
+    .replace(/we're/gi, "we are")
+    .replace(/they're/gi, "they are")
+    .replace(/it's/gi, "it is")
+    .replace(/that's/gi, "that is")
+    .replace(/here's/gi, "here is")
+    .replace(/there's/gi, "there is")
+    .replace(/what's/gi, "what is")
+    .replace(/let's/gi, "let us")
+
+  // Fix number formatting (write out numbers under 10)
+  cleaned = cleaned
+    .replace(/\b1\b/g, "one")
+    .replace(/\b2\b/g, "two")
+    .replace(/\b3\b/g, "three")
+    .replace(/\b4\b/g, "four")
+    .replace(/\b5\b/g, "five")
+    .replace(/\b6\b/g, "six")
+    .replace(/\b7\b/g, "seven")
+    .replace(/\b8\b/g, "eight")
+    .replace(/\b9\b/g, "nine")
+
+  // Ensure proper sentence structure
+  cleaned = cleaned
+    .replace(/\s+/g, " ") // Normalize whitespace
+    .replace(/\s*([.!?])\s*/g, "$1 ") // Fix punctuation spacing
+    .replace(/([.!?])\s*([a-z])/g, "$1 $2") // Ensure space after sentence endings
+    .replace(/([.!?])([A-Z])/g, "$1 $2") // Space between sentences
+
+  // Capitalize first letter of sentences
+  cleaned = cleaned.replace(/(^|[.!?]\s+)([a-z])/g, (match, p1, p2) => p1 + p2.toUpperCase())
+
+  // Final cleanup
+  cleaned = cleaned.trim()
+
+  console.log("✅ Grammar fixes and sanitization complete")
+  return cleaned
 }
 
 export async function POST(request: NextRequest) {
