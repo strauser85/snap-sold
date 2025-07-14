@@ -4,7 +4,8 @@ import { useRef, useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Download, Loader2, CheckCircle, Volume2, Play, RotateCcw } from "lucide-react"
+import { Download, Loader2, CheckCircle, Volume2, Play, RotateCcw, AlertTriangle, Zap } from "lucide-react"
+import { SimpleReliableGenerator } from "./simple-reliable-generator"
 
 interface WordTiming {
   word: string
@@ -24,17 +25,12 @@ interface VideoConfig {
   audioUrl: string
   duration: number
   timePerImage: number
-  captions: CaptionChunk[]
+  captions: any[]
   property: any
   format: {
     width: number
     height: number
     fps: number
-  }
-  metadata?: {
-    alignmentUsed: boolean
-    captionDelay: number
-    captionType: string
   }
 }
 
@@ -58,6 +54,7 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
   const [audioReady, setAudioReady] = useState(false)
   const [actualAudioDuration, setActualAudioDuration] = useState<number | null>(null)
   const [debugInfo, setDebugInfo] = useState<string[]>([])
+  const [useSimpleMode, setUseSimpleMode] = useState(false)
 
   const addDebugInfo = useCallback((info: string) => {
     console.log("🔧 AUDIO DEBUG:", info)
@@ -168,7 +165,7 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
   }, [config.audioUrl, config.duration, actualAudioDuration])
 
   // Recalculate caption timing based on actual audio duration
-  const recalculateCaptionTiming = useCallback((captions: CaptionChunk[], audioDuration: number) => {
+  const recalculateCaptionTiming = useCallback((captions: any[], audioDuration: number) => {
     if (!captions || captions.length === 0) return captions
 
     console.log(`🔄 Recalculating caption timing for ${audioDuration.toFixed(2)}s audio`)
@@ -579,6 +576,10 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
     }
   }, [config.audioUrl, audioReady, actualAudioDuration, testAudio, detectAudioDurationFallback])
 
+  if (useSimpleMode) {
+    return <SimpleReliableGenerator config={config} onVideoGenerated={onVideoGenerated} onError={onError} />
+  }
+
   return (
     <div className="space-y-4">
       <canvas ref={canvasRef} className="hidden" width={config.format.width} height={config.format.height} />
@@ -688,6 +689,27 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
             </Button>
           </div>
         </div>
+      )}
+
+      {!videoUrl && isGenerating && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            <div className="space-y-3">
+              <p>
+                <strong>Video Generation Issue Detected</strong>
+              </p>
+              <p>
+                The advanced audio-sync generator is experiencing technical difficulties and getting stuck at 50%. This
+                is likely due to browser compatibility issues with MediaRecorder and Web Audio API.
+              </p>
+              <Button onClick={() => setUseSimpleMode(true)} className="bg-blue-600 hover:bg-blue-700 text-white">
+                <Zap className="mr-2 h-4 w-4" />
+                Switch to Simple Video Generator
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
     </div>
   )
