@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Loader2,
@@ -21,7 +20,7 @@ import {
   RefreshCw,
 } from "lucide-react"
 import Textarea from "@/components/ui/textarea"
-import { SyncedVideoGenerator } from "@/components/synced-video-generator"
+import { SeamlessVideoGenerator } from "@/components/seamless-video-generator"
 
 interface UploadedImage {
   file: File
@@ -45,13 +44,10 @@ export default function VideoGenerator() {
 
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
-  const [progress, setProgress] = useState(0)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const MAX_IMAGES = 15
-
-  const [videoConfig, setVideoConfig] = useState<any>(null)
 
   // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
@@ -219,44 +215,23 @@ export default function VideoGenerator() {
     setIsLoading(true)
     setError(null)
     setVideoUrl(null)
-    setProgress(0)
 
-    try {
-      const imageUrls = successfulImages.map((img) => img.blobUrl!)
+    const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
-      // Call the complete video generation API
-      const response = await fetch("/api/generate-complete-video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address,
-          price: Number(price),
-          bedrooms: Number(bedrooms),
-          bathrooms: Number(bathrooms),
-          sqft: Number(sqft),
-          propertyDescription: propertyDescription.trim(),
-          script: generatedScript,
-          imageUrls: imageUrls,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.details || data.error || `Server error: ${response.status}`)
-      }
-
-      if (data.success) {
-        setProgress(50)
-        setVideoConfig(data) // Store the config for the synced generator
-      } else {
-        throw new Error("Failed to prepare video data")
-      }
-    } catch (err) {
-      console.error("Generation error:", err)
-      setError(err instanceof Error ? err.message : "Video generation failed")
-      setIsLoading(false)
+    // Pass data to seamless generator
+    const propertyData = {
+      address,
+      price: Number(price),
+      bedrooms: Number(bedrooms),
+      bathrooms: Number(bathrooms),
+      sqft: Number(sqft),
+      propertyDescription: propertyDescription.trim(),
+      script: generatedScript,
+      imageUrls: imageUrls,
     }
+
+    // The SeamlessVideoGenerator will handle everything from here
+    return { propertyData }
   }
 
   const resetForm = () => {
@@ -272,12 +247,27 @@ export default function VideoGenerator() {
     setUploadedImages([])
     setVideoUrl(null)
     setError(null)
-    setProgress(0)
+    setIsLoading(false)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
   const uploadingCount = uploadedImages.filter((img) => img.isUploading).length
   const failedCount = uploadedImages.filter((img) => img.uploadError).length
+
+  // Check if we should show the seamless generator
+  const shouldShowGenerator = isLoading && !videoUrl && !error
+  const propertyData = shouldShowGenerator
+    ? {
+        address,
+        price: Number(price),
+        bedrooms: Number(bedrooms),
+        bathrooms: Number(bathrooms),
+        sqft: Number(sqft),
+        propertyDescription: propertyDescription.trim(),
+        script: generatedScript,
+        imageUrls: uploadedImages.filter((img) => img.blobUrl).map((img) => img.blobUrl!),
+      }
+    : null
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
@@ -536,32 +526,19 @@ export default function VideoGenerator() {
           </CardContent>
         </Card>
 
-        {/* Synced Video Generator */}
-        {videoConfig && !videoUrl && (
-          <SyncedVideoGenerator
-            config={videoConfig}
+        {/* Seamless Video Generator */}
+        {shouldShowGenerator && propertyData && (
+          <SeamlessVideoGenerator
+            propertyData={propertyData}
             onVideoGenerated={(url) => {
               setVideoUrl(url)
               setIsLoading(false)
-              setProgress(100)
             }}
             onError={(err) => {
               setError(err)
               setIsLoading(false)
             }}
           />
-        )}
-
-        {/* Clean Progress Bar */}
-        {isLoading && (
-          <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
-            <CardContent className="p-6">
-              <div className="text-center space-y-4">
-                <div className="text-2xl font-bold text-gray-700">{Math.round(progress)}%</div>
-                <Progress value={progress} className="h-4" />
-              </div>
-            </CardContent>
-          </Card>
         )}
 
         {/* Error */}
@@ -600,7 +577,7 @@ export default function VideoGenerator() {
                     asChild
                     className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
                   >
-                    <a href={videoUrl} download="tiktok-property-video.webm">
+                    <a href={videoUrl} download="tiktok-property-video.mp4">
                       <Download className="mr-2 h-5 w-5" />
                       Download MP4
                     </a>
