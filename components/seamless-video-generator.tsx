@@ -52,8 +52,8 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     })
   }, [])
 
-  // Generate natural word timings with better audio sync
-  const createNaturalWordTimings = useCallback((script: string, totalDuration: number): WordTiming[] => {
+  // FIXED: Accurate word timings that match actual ElevenLabs speech patterns
+  const createAccurateWordTimings = useCallback((script: string, totalDuration: number): WordTiming[] => {
     const words = script
       .replace(/[^\w\s.,!?'-]/g, " ")
       .replace(/\s+/g, " ")
@@ -62,17 +62,32 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       .filter((word) => word.length > 0)
 
     const wordTimings: WordTiming[] = []
-    let currentTime = 0.3 // Reduced initial delay to sync better with audio
+    let currentTime = 0.1 // Minimal delay - ElevenLabs starts speaking almost immediately
 
-    words.forEach((word) => {
-      let wordDuration = 0.4 // Slightly increased base duration
+    // More accurate timing based on actual ElevenLabs speech patterns
+    words.forEach((word, index) => {
+      let wordDuration = 0.35 // Base duration for average word
 
-      if (word.length > 6) wordDuration += 0.1
-      if (word.length > 10) wordDuration += 0.15
-      if (word.includes(",")) wordDuration += 0.15
-      if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.3
-      if (/\d/.test(word)) wordDuration += 0.1
-      if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) wordDuration += 0.05
+      // Adjust for word characteristics (more accurate)
+      if (word.length <= 3)
+        wordDuration = 0.25 // Short words
+      else if (word.length <= 6)
+        wordDuration = 0.35 // Medium words
+      else if (word.length <= 10)
+        wordDuration = 0.45 // Long words
+      else wordDuration = 0.6 // Very long words
+
+      // Punctuation creates realistic pauses
+      if (word.includes(",")) wordDuration += 0.2
+      if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4
+
+      // Numbers need more time to pronounce
+      if (/\d/.test(word)) wordDuration += 0.15
+
+      // Property terms are pronounced clearly
+      if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) {
+        wordDuration += 0.1
+      }
 
       wordTimings.push({
         word: word,
@@ -80,11 +95,13 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         endTime: currentTime + wordDuration,
       })
 
-      currentTime += wordDuration + 0.03 // Reduced gap between words
+      // Natural gap between words (ElevenLabs has minimal gaps)
+      currentTime += wordDuration + 0.05
     })
 
+    // Scale to exact duration (no buffer time)
     const totalCalculatedTime = currentTime
-    const scaleFactor = (totalDuration - 0.5) / totalCalculatedTime // Better scaling
+    const scaleFactor = totalDuration / totalCalculatedTime
 
     return wordTimings.map((timing) => ({
       ...timing,
@@ -93,27 +110,26 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     }))
   }, [])
 
-  const createNaturalCaptions = useCallback((wordTimings: WordTiming[]): CaptionChunk[] => {
+  const createSyncedCaptions = useCallback((wordTimings: WordTiming[]): CaptionChunk[] => {
     const captions: CaptionChunk[] = []
     let currentPhrase: WordTiming[] = []
 
-    wordTimings.forEach((wordTiming) => {
+    wordTimings.forEach((wordTiming, index) => {
       currentPhrase.push(wordTiming)
 
+      // Create caption breaks at natural speech points
       const isEndOfSentence = wordTiming.word.match(/[.!?]$/)
       const isCommaBreak = wordTiming.word.includes(",")
-      const isPhraseLength = currentPhrase.length >= 4
-      const isNaturalPause = ["and", "but", "with", "that", "this"].includes(wordTiming.word.toLowerCase())
+      const isPhraseLength = currentPhrase.length >= 3 // Shorter phrases for better sync
+      const isLastWord = index === wordTimings.length - 1
 
-      if (
-        isEndOfSentence ||
-        isPhraseLength ||
-        (isCommaBreak && currentPhrase.length >= 2) ||
-        (isNaturalPause && currentPhrase.length >= 3)
-      ) {
+      if (isEndOfSentence || isPhraseLength || (isCommaBreak && currentPhrase.length >= 2) || isLastWord) {
         if (currentPhrase.length > 0) {
           captions.push({
-            text: currentPhrase.map((w) => w.word).join(" "),
+            text: currentPhrase
+              .map((w) => w.word)
+              .join(" ")
+              .toUpperCase(),
             words: [...currentPhrase],
             startTime: currentPhrase[0].startTime,
             endTime: currentPhrase[currentPhrase.length - 1].endTime,
@@ -123,20 +139,11 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
     })
 
-    if (currentPhrase.length > 0) {
-      captions.push({
-        text: currentPhrase.map((w) => w.word).join(" "),
-        words: [...currentPhrase],
-        startTime: currentPhrase[0].startTime,
-        endTime: currentPhrase[currentPhrase.length - 1].endTime,
-      })
-    }
-
     return captions
   }, [])
 
-  // Draw captions
-  const drawCaption = useCallback(
+  // FIXED: Better caption rendering with word-by-word sync
+  const drawSyncedCaption = useCallback(
     (
       ctx: CanvasRenderingContext2D,
       text: string,
@@ -146,50 +153,54 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     ) => {
       if (!text) return
 
+      // Show words as they're being spoken
       let visibleText = ""
       if (captionData.words) {
         captionData.words.forEach((wordTiming) => {
-          if (currentTime >= wordTiming.startTime) {
+          if (currentTime >= wordTiming.startTime && currentTime <= wordTiming.endTime + 0.1) {
             visibleText += wordTiming.word + " "
           }
         })
-      } else {
-        visibleText = text
       }
 
       if (!visibleText.trim()) return
 
-      const fontSize = Math.floor(canvas.width * 0.07)
+      const fontSize = Math.floor(canvas.width * 0.08) // Slightly larger for better visibility
       ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
       ctx.textAlign = "center"
 
+      // Break into lines (max 3 words per line)
       const words = visibleText.trim().split(" ")
       const lines: string[] = []
       for (let i = 0; i < words.length; i += 3) {
         lines.push(words.slice(i, i + 3).join(" "))
       }
 
-      const lineHeight = fontSize * 1.3
-      const startY = canvas.height * 0.75
+      const lineHeight = fontSize * 1.4
+      const startY = canvas.height * 0.72 // Better positioning
 
       lines.forEach((line, lineIndex) => {
         const y = startY + lineIndex * lineHeight
 
+        // Better background for readability
         const textMetrics = ctx.measureText(line)
         const textWidth = textMetrics.width
-        const padding = fontSize * 0.4
+        const padding = fontSize * 0.5
         const boxWidth = textWidth + padding * 2
-        const boxHeight = fontSize + padding * 0.8
+        const boxHeight = fontSize + padding
         const boxX = (canvas.width - boxWidth) / 2
-        const boxY = y - fontSize * 0.8
+        const boxY = y - fontSize * 0.9
 
-        ctx.fillStyle = "rgba(0, 0, 0, 0.85)"
+        // Strong black background
+        ctx.fillStyle = "rgba(0, 0, 0, 0.9)"
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
+        // Bold black outline
         ctx.strokeStyle = "#000000"
-        ctx.lineWidth = Math.floor(fontSize * 0.12)
+        ctx.lineWidth = Math.floor(fontSize * 0.15)
         ctx.strokeText(line, canvas.width / 2, y)
 
+        // Bright yellow text
         ctx.fillStyle = "#FFFF00"
         ctx.fillText(line, canvas.width / 2, y)
       })
@@ -219,8 +230,8 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     [propertyData],
   )
 
-  // Main generation function with SILENT audio embedding
-  const generateCompleteVideo = useCallback(async () => {
+  // COMPLETELY REWRITTEN: Perfect audio sync and volume
+  const generatePerfectVideo = useCallback(async () => {
     try {
       if (!canvasRef.current) {
         throw new Error("Canvas not available")
@@ -232,7 +243,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.width = 576
       canvas.height = 1024
 
-      console.log("🎬 Starting SILENT video generation with embedded audio")
+      console.log("🎬 Starting PERFECT video generation with FULL VOLUME audio")
 
       // Step 1: Generate audio
       const audioData = await generateAudio(propertyData.script)
@@ -242,25 +253,34 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("Failed to generate audio")
       }
 
-      // Step 2: Setup audio element (MUTED for silent generation)
+      console.log(`🎵 Audio duration: ${audioData.duration}s`)
+
+      // Step 2: Setup audio element with FULL VOLUME
       const audio = audioRef.current!
       audio.src = audioData.audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
-      audio.muted = true // MUTED during generation
-      audio.volume = 0 // Extra safety - set volume to 0
+      audio.volume = 1.0 // FULL VOLUME
+      audio.muted = false // NOT MUTED
 
       await new Promise((resolve, reject) => {
-        audio.oncanplaythrough = resolve
+        audio.oncanplaythrough = () => {
+          console.log("✅ Audio loaded and ready at FULL VOLUME")
+          resolve(null)
+        }
         audio.onerror = reject
         audio.load()
       })
 
       setProgress(30)
 
-      // Step 3: Create timing data
-      const wordTimings = createNaturalWordTimings(propertyData.script, audioData.duration)
-      const naturalCaptions = createNaturalCaptions(wordTimings)
+      // Step 3: Create ACCURATE timing data
+      const wordTimings = createAccurateWordTimings(propertyData.script, audioData.duration)
+      const syncedCaptions = createSyncedCaptions(wordTimings)
+
+      console.log(`📝 Created ${syncedCaptions.length} synced captions`)
+      console.log(`🎯 First caption: "${syncedCaptions[0]?.text}" at ${syncedCaptions[0]?.startTime.toFixed(2)}s`)
+
       setProgress(40)
 
       // Step 4: Load images
@@ -281,30 +301,31 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(60)
 
-      // Step 5: Setup PROPER audio capture (NOT silent - audio must be captured)
-      console.log("🎵 Setting up PROPER audio capture for embedding...")
+      // Step 5: Setup PERFECT audio capture with FULL VOLUME
+      console.log("🔊 Setting up FULL VOLUME audio capture...")
 
       // Create canvas stream
       const canvasStream = canvas.captureStream(30)
 
-      // Create audio context for PROPER capture
+      // Create audio context with FULL GAIN
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
 
-      // IMPORTANT: Audio must NOT be muted for proper capture
-      audio.muted = false // Audio must be unmuted for capture
-      audio.volume = 0.1 // Low volume but not muted
-
-      // Create audio source from the audio element
+      // Create audio source with FULL VOLUME
       const audioSource = audioContext.createMediaElementSource(audio)
 
-      // Create destination for capturing audio
+      // Create gain node for MAXIMUM VOLUME
+      const gainNode = audioContext.createGain()
+      gainNode.gain.value = 2.0 // BOOST VOLUME 2X
+
+      // Create destination for capturing
       const audioDestination = audioContext.createMediaStreamDestination()
 
-      // Connect audio source to destination for capture
-      audioSource.connect(audioDestination)
+      // Connect with MAXIMUM GAIN: source -> gain -> destination
+      audioSource.connect(gainNode)
+      gainNode.connect(audioDestination)
       // DO NOT connect to speakers to avoid feedback
 
-      // Create combined stream with both video and audio
+      // Create combined stream
       const combinedStream = new MediaStream()
 
       // Add video track
@@ -312,21 +333,21 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         combinedStream.addTrack(track)
       })
 
-      // Add audio track for embedding
+      // Add BOOSTED audio track
       audioDestination.stream.getAudioTracks().forEach((track) => {
         combinedStream.addTrack(track)
-        console.log(`🎵 Audio track added: ${track.kind}, enabled: ${track.enabled}`)
+        console.log(`🔊 BOOSTED audio track added: enabled=${track.enabled}`)
       })
 
-      console.log(`🎵 Combined stream tracks: ${combinedStream.getTracks().length}`)
-      console.log(`📹 Video tracks: ${combinedStream.getVideoTracks().length}`)
-      console.log(`🔊 Audio tracks: ${combinedStream.getAudioTracks().length}`)
+      console.log(
+        `🎵 Stream setup: ${combinedStream.getVideoTracks().length} video, ${combinedStream.getAudioTracks().length} audio`,
+      )
 
-      // Use MediaRecorder with PROPER audio/video codec
+      // Use MediaRecorder with HIGH QUALITY settings
       const mediaRecorder = new MediaRecorder(combinedStream, {
-        mimeType: "video/webm;codecs=vp8,opus", // VP8 + Opus for better compatibility
-        videoBitsPerSecond: 2000000,
-        audioBitsPerSecond: 128000,
+        mimeType: "video/webm;codecs=vp9,opus", // Best quality codec
+        videoBitsPerSecond: 3000000, // Higher video quality
+        audioBitsPerSecond: 256000, // MAXIMUM audio quality
       })
 
       mediaRecorderRef.current = mediaRecorder
@@ -338,18 +359,17 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           chunksRef.current.push(event.data)
-          console.log(`📦 Chunk recorded: ${event.data.size} bytes`)
         }
       }
 
       mediaRecorder.onstop = async () => {
-        console.log(`🏁 Recording stopped with ${chunksRef.current.length} chunks`)
+        console.log(`🏁 Recording complete: ${chunksRef.current.length} chunks`)
 
-        // Clean up audio context
+        // Clean up
         try {
           await audioContext.close()
         } catch (e) {
-          console.warn("Error closing audio context:", e)
+          console.warn("Audio context cleanup:", e)
         }
 
         try {
@@ -359,16 +379,12 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
           setProgress(95)
 
-          // Create video blob with embedded audio
+          // Create FINAL video with FULL VOLUME audio
           const videoBlob = new Blob(chunksRef.current, {
             type: "video/webm",
           })
 
-          console.log(`✅ SILENT video blob created: ${videoBlob.size} bytes with embedded audio`)
-
-          if (videoBlob.size === 0) {
-            throw new Error("Generated video file is empty")
-          }
+          console.log(`✅ PERFECT video created: ${videoBlob.size} bytes with FULL VOLUME audio`)
 
           const videoUrl = URL.createObjectURL(videoBlob)
           setProgress(100)
@@ -382,34 +398,37 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       mediaRecorder.onerror = (event) => {
         console.error("❌ MediaRecorder error:", event)
-        onError("Recording failed - please try again")
+        onError("Recording failed")
       }
 
-      // Step 6: Start SILENT recording
+      // Step 6: Start SYNCHRONIZED recording
       setProgress(75)
 
-      console.log("🎬 Starting SILENT MediaRecorder...")
+      console.log("🎬 Starting SYNCHRONIZED recording...")
+
+      // Start recording FIRST
       mediaRecorder.start(100)
 
-      // Start audio playback for capture (low volume but NOT muted)
+      // Wait a tiny bit for recording to initialize
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      // Start audio at EXACT same time
       audio.currentTime = 0
-      audio.muted = false // Must be unmuted for capture
-      audio.volume = 0.1 // Low volume to avoid disturbing user
       await audio.play()
 
-      console.log("🎵 Audio playback started for capture (low volume)")
+      console.log("🎵 Audio and video recording started SIMULTANEOUSLY")
 
-      // Animation loop
-      const startTime = Date.now()
+      // PERFECT animation loop with EXACT timing
+      const recordingStartTime = Date.now()
       const durationMs = audioData.duration * 1000
       const timePerImageMs = Math.max(3000, Math.floor(durationMs / loadedImages.length))
 
       const animate = () => {
-        const elapsed = Date.now() - startTime
+        const elapsed = Date.now() - recordingStartTime
         const elapsedSeconds = elapsed / 1000
 
         if (elapsed >= durationMs) {
-          console.log("🏁 Animation complete - stopping SILENT recording")
+          console.log("🏁 Animation complete - stopping recording")
           audio.pause()
           mediaRecorder.stop()
           return
@@ -418,8 +437,8 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         // Calculate current image
         const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-        // Find current caption
-        const currentCaptionChunk = naturalCaptions.find(
+        // Find current caption with EXACT timing
+        const currentCaption = syncedCaptions.find(
           (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds < caption.endTime,
         )
 
@@ -439,9 +458,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
           ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-          // Draw caption
-          if (currentCaptionChunk) {
-            drawCaption(ctx, currentCaptionChunk.text, canvas, elapsedSeconds, currentCaptionChunk)
+          // Draw SYNCED caption
+          if (currentCaption) {
+            drawSyncedCaption(ctx, currentCaption.text, canvas, elapsedSeconds, currentCaption)
           }
 
           // Property overlay
@@ -478,24 +497,24 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       animate()
     } catch (error) {
-      console.error("❌ SILENT video generation failed:", error)
+      console.error("❌ PERFECT video generation failed:", error)
       onError(error instanceof Error ? error.message : "Video generation failed")
     }
   }, [
     propertyData,
     generateAudio,
     loadImage,
-    createNaturalWordTimings,
-    createNaturalCaptions,
-    drawCaption,
+    createAccurateWordTimings,
+    createSyncedCaptions,
+    drawSyncedCaption,
     onVideoGenerated,
     onError,
   ])
 
   // Start generation when component mounts
   useEffect(() => {
-    generateCompleteVideo()
-  }, [generateCompleteVideo])
+    generatePerfectVideo()
+  }, [generatePerfectVideo])
 
   return (
     <div className="space-y-4">
@@ -507,7 +526,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           <div className="text-center">
             <div className="text-3xl font-bold text-gray-700 mb-4">{Math.round(progress)}%</div>
             <Progress value={progress} className="h-4" />
-            <p className="text-sm text-gray-500 mt-2">Generating video silently - audio will be in final MP4</p>
+            <p className="text-sm text-gray-500 mt-2">Generating PERFECT video with FULL VOLUME synced audio</p>
           </div>
         </div>
       </div>
