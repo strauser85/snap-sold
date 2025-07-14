@@ -37,12 +37,10 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const animationRef = useRef<number | null>(null)
 
   const [progress, setProgress] = useState(0)
-  const [currentStep, setCurrentStep] = useState("Initializing...")
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -115,7 +113,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       ) {
         if (currentPhrase.length > 0) {
           captions.push({
-            text: currentPhrase.map((w) => w.word).join(" "), // Keep original punctuation, don't convert to uppercase
+            text: currentPhrase.map((w) => w.word).join(" "),
             words: [...currentPhrase],
             startTime: currentPhrase[0].startTime,
             endTime: currentPhrase[currentPhrase.length - 1].endTime,
@@ -127,7 +125,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
     if (currentPhrase.length > 0) {
       captions.push({
-        text: currentPhrase.map((w) => w.word).join(" "), // Keep original punctuation
+        text: currentPhrase.map((w) => w.word).join(" "),
         words: [...currentPhrase],
         startTime: currentPhrase[0].startTime,
         endTime: currentPhrase[currentPhrase.length - 1].endTime,
@@ -221,7 +219,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     [propertyData],
   )
 
-  // Main generation function
+  // Main generation function with FIXED audio embedding
   const generateCompleteVideo = useCallback(async () => {
     try {
       if (!canvasRef.current) {
@@ -234,9 +232,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.width = 576
       canvas.height = 1024
 
-      console.log("🎬 Starting seamless video generation")
+      console.log("🎬 Starting video generation with PROPER audio embedding")
 
-      // Step 1: Generate audio and get timing data
+      // Step 1: Generate audio
       const audioData = await generateAudio(propertyData.script)
       setProgress(20)
 
@@ -244,7 +242,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("Failed to generate audio")
       }
 
-      // Step 2: Setup audio
+      // Step 2: Setup audio element
       const audio = audioRef.current!
       audio.src = audioData.audioUrl
       audio.preload = "auto"
@@ -259,12 +257,11 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       setProgress(30)
 
       // Step 3: Create timing data
-      setProgress(40)
       const wordTimings = createNaturalWordTimings(propertyData.script, audioData.duration)
       const naturalCaptions = createNaturalCaptions(wordTimings)
+      setProgress(40)
 
       // Step 4: Load images
-      setProgress(40)
       const loadedImages: HTMLImageElement[] = []
       for (let i = 0; i < propertyData.imageUrls.length; i++) {
         try {
@@ -282,79 +279,72 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(60)
 
-      // Step 5: Setup recording with FIXED audio embedding
-      setProgress(70)
+      // Step 5: Setup recording with PROPER audio capture
+      console.log("🎵 Setting up PROPER audio capture...")
 
       // Create canvas stream
       const canvasStream = canvas.captureStream(30)
 
-      // Create a new MediaStream that will contain both video and audio
-      const finalStream = new MediaStream()
+      // Create audio context and capture audio properly
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
 
-      // Add video track from canvas
+      // Create audio source from the audio element
+      const audioSource = audioContext.createMediaElementSource(audio)
+
+      // Create destination for capturing audio
+      const audioDestination = audioContext.createMediaStreamDestination()
+
+      // Connect audio source to destination (this captures the audio)
+      audioSource.connect(audioDestination)
+
+      // IMPORTANT: Also connect to speakers so we can hear it during generation
+      audioSource.connect(audioContext.destination)
+
+      // Create combined stream with both video and audio
+      const combinedStream = new MediaStream()
+
+      // Add video track
       canvasStream.getVideoTracks().forEach((track) => {
-        finalStream.addTrack(track)
+        combinedStream.addTrack(track)
       })
 
-      // Create audio stream using MediaElementAudioSourceNode
-      try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-        audioContextRef.current = audioContext
+      // Add audio track
+      audioDestination.stream.getAudioTracks().forEach((track) => {
+        combinedStream.addTrack(track)
+      })
 
-        // Create audio source and destination
-        const source = audioContext.createMediaElementSource(audio)
-        const destination = audioContext.createMediaStreamDestination()
+      console.log(`🎵 Combined stream tracks: ${combinedStream.getTracks().length}`)
+      console.log(`📹 Video tracks: ${combinedStream.getVideoTracks().length}`)
+      console.log(`🔊 Audio tracks: ${combinedStream.getAudioTracks().length}`)
 
-        // Connect source to destination (this creates the audio stream)
-        source.connect(destination)
-
-        // Add audio track to final stream
-        destination.stream.getAudioTracks().forEach((track) => {
-          finalStream.addTrack(track)
-        })
-
-        console.log(`🎵 Audio tracks added: ${finalStream.getAudioTracks().length}`)
-      } catch (audioError) {
-        console.error("Audio setup failed:", audioError)
-        // Continue without audio if setup fails
-      }
-
-      // Use the most compatible format for audio
-      let options = {
-        mimeType: "video/webm;codecs=vp8,opus",
+      // Use MediaRecorder with the combined stream
+      const mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: "video/webm;codecs=vp8,opus", // VP8 + Opus for better compatibility
         videoBitsPerSecond: 2000000,
         audioBitsPerSecond: 128000,
-      }
-
-      // Fallback if not supported
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = {
-          mimeType: "video/webm",
-          videoBitsPerSecond: 2000000,
-          audioBitsPerSecond: 128000,
-        }
-      }
-
-      const mediaRecorder = new MediaRecorder(finalStream, options)
+      })
 
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
+
+      setProgress(70)
 
       // Setup recording handlers
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           chunksRef.current.push(event.data)
+          console.log(`📦 Chunk recorded: ${event.data.size} bytes`)
         }
       }
 
       mediaRecorder.onstop = async () => {
+        console.log(`🏁 Recording stopped with ${chunksRef.current.length} chunks`)
+
         // Clean up audio context
-        if (audioContextRef.current) {
-          try {
-            await audioContextRef.current.close()
-          } catch (e) {
-            console.warn("Error closing audio context:", e)
-          }
+        try {
+          await audioContext.close()
+        } catch (e) {
+          console.warn("Error closing audio context:", e)
         }
 
         try {
@@ -364,17 +354,18 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
           setProgress(95)
 
-          // Create video blob with proper MIME type
-          const videoBlob = new Blob(chunksRef.current, { type: options.mimeType })
+          // Create video blob
+          const videoBlob = new Blob(chunksRef.current, {
+            type: "video/webm",
+          })
 
-          // Verify the blob has content
+          console.log(`✅ Video blob created: ${videoBlob.size} bytes`)
+
           if (videoBlob.size === 0) {
             throw new Error("Generated video file is empty")
           }
 
           const videoUrl = URL.createObjectURL(videoBlob)
-
-          console.log(`✅ Video created: ${videoBlob.size} bytes with embedded audio`)
           setProgress(100)
 
           onVideoGenerated(videoUrl)
@@ -392,13 +383,15 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       // Step 6: Start recording
       setProgress(75)
 
-      mediaRecorder.start(100)
-      console.log("🎬 Recording started")
+      console.log("🎬 Starting MediaRecorder...")
+      mediaRecorder.start(100) // Record in small chunks
 
-      // Start audio (muted for generation)
+      // Start audio playback (NOT muted - we need the audio to be captured)
       audio.currentTime = 0
-      audio.muted = true
+      audio.muted = false // IMPORTANT: Don't mute the audio!
       await audio.play()
+
+      console.log("🎵 Audio playback started (unmuted for capture)")
 
       // Animation loop
       const startTime = Date.now()
@@ -410,7 +403,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         const elapsedSeconds = elapsed / 1000
 
         if (elapsed >= durationMs) {
-          console.log("🏁 Animation complete")
+          console.log("🏁 Animation complete - stopping recording")
           audio.pause()
           mediaRecorder.stop()
           return
@@ -479,7 +472,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       animate()
     } catch (error) {
-      console.error("❌ Seamless video generation failed:", error)
+      console.error("❌ Video generation failed:", error)
       onError(error instanceof Error ? error.message : "Video generation failed")
     }
   }, [
