@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useCallback } from "react"
+import { useRef, useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -57,6 +57,12 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
   const [currentCaption, setCurrentCaption] = useState("")
   const [audioReady, setAudioReady] = useState(false)
   const [actualAudioDuration, setActualAudioDuration] = useState<number | null>(null)
+  const [debugInfo, setDebugInfo] = useState<string[]>([])
+
+  const addDebugInfo = useCallback((info: string) => {
+    console.log("🔧 AUDIO DEBUG:", info)
+    setDebugInfo((prev) => [...prev.slice(-10), `${new Date().toLocaleTimeString()}: ${info}`])
+  }, [])
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -68,29 +74,98 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
     })
   }, [])
 
-  // Test audio and get actual duration
+  // Test audio and get actual duration - FIXED VERSION
   const testAudio = useCallback(async () => {
     if (!config.audioUrl || !audioRef.current) return
+
+    addDebugInfo("Starting audio duration test...")
+    addDebugInfo(`Audio URL type: ${config.audioUrl.startsWith("data:") ? "Data URL" : "Regular URL"}`)
+    addDebugInfo(`Audio URL length: ${config.audioUrl.length} chars`)
 
     try {
       const audio = audioRef.current
       audio.src = config.audioUrl
 
       await new Promise((resolve, reject) => {
-        audio.onloadedmetadata = () => {
+        const handleLoadedMetadata = () => {
           setActualAudioDuration(audio.duration)
           setAudioReady(true)
-          console.log(`✅ Audio loaded: ${audio.duration.toFixed(2)}s actual duration`)
+          addDebugInfo(`✅ Audio loaded: ${audio.duration.toFixed(2)}s actual duration`)
+          audio.removeEventListener("loadedmetadata", handleLoadedMetadata)
+          audio.removeEventListener("error", handleError)
           resolve(null)
         }
-        audio.onerror = reject
+
+        const handleError = (e: any) => {
+          addDebugInfo(`❌ Audio loading failed: ${e.type || e.message}`)
+          setAudioReady(false)
+          audio.removeEventListener("loadedmetadata", handleLoadedMetadata)
+          audio.removeEventListener("error", handleError)
+          reject(e)
+        }
+
+        audio.addEventListener("loadedmetadata", handleLoadedMetadata)
+        audio.addEventListener("error", handleError)
         audio.load()
       })
     } catch (error) {
-      console.error("Audio test failed:", error)
+      addDebugInfo(`❌ Audio test exception: ${error}`)
       setAudioReady(false)
     }
-  }, [config.audioUrl])
+  }, [config.audioUrl, addDebugInfo])
+
+  // Fallback audio duration detection using URL.createObjectURL
+  const detectAudioDurationFallback = useCallback(async () => {
+    if (!config.audioUrl || actualAudioDuration) return
+
+    try {
+      console.log("🔄 Trying fallback audio duration detection...")
+
+      // For data URLs, try to decode and measure
+      if (config.audioUrl.startsWith("data:audio/")) {
+        // Extract base64 data
+        const base64Data = config.audioUrl.split(",")[1]
+        const binaryData = atob(base64Data)
+        const arrayBuffer = new ArrayBuffer(binaryData.length)
+        const uint8Array = new Uint8Array(arrayBuffer)
+
+        for (let i = 0; i < binaryData.length; i++) {
+          uint8Array[i] = binaryData.charCodeAt(i)
+        }
+
+        const blob = new Blob([arrayBuffer], { type: "audio/mpeg" })
+        const objectUrl = URL.createObjectURL(blob)
+
+        const tempAudio = new Audio()
+        tempAudio.preload = "metadata"
+
+        await new Promise((resolve, reject) => {
+          tempAudio.onloadedmetadata = () => {
+            setActualAudioDuration(tempAudio.duration)
+            setAudioReady(true)
+            console.log(`✅ Fallback audio duration detected: ${tempAudio.duration.toFixed(2)}s`)
+            URL.revokeObjectURL(objectUrl)
+            resolve(null)
+          }
+
+          tempAudio.onerror = (e) => {
+            console.error("Fallback audio detection failed:", e)
+            URL.revokeObjectURL(objectUrl)
+            reject(e)
+          }
+
+          tempAudio.src = objectUrl
+        })
+      }
+    } catch (error) {
+      console.error("Fallback audio duration detection failed:", error)
+      // Use estimated duration as last resort
+      const estimatedDuration = config.duration || 45
+      setActualAudioDuration(estimatedDuration)
+      setAudioReady(true)
+      console.log(`⚠️ Using estimated duration: ${estimatedDuration}s`)
+    }
+  }, [config.audioUrl, config.duration, actualAudioDuration])
 
   // Recalculate caption timing based on actual audio duration
   const recalculateCaptionTiming = useCallback((captions: CaptionChunk[], audioDuration: number) => {
@@ -441,17 +516,21 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
     setCurrentCaption("")
   }, [])
 
-  // Test audio on mount
-  useState(() => {
-    if (config.audioUrl && !audioReady) {
-      testAudio()
+  // Test audio on mount with fallback - UPDATED VERSION
+  useEffect(() => {
+    if (config.audioUrl && !audioReady && !actualAudioDuration) {
+      console.log("🔄 Testing audio duration...")
+      testAudio().catch(() => {
+        console.log("🔄 Primary audio test failed, trying fallback...")
+        detectAudioDurationFallback()
+      })
     }
-  })
+  }, [config.audioUrl, audioReady, actualAudioDuration, testAudio, detectAudioDurationFallback])
 
   return (
     <div className="space-y-4">
       <canvas ref={canvasRef} className="hidden" width={config.format.width} height={config.format.height} />
-      <audio ref={audioRef} preload="metadata" className="hidden" />
+      <audio ref={audioRef} preload="metadata" crossOrigin="anonymous" className="hidden" />
 
       {!videoUrl && !isGenerating && (
         <div className="text-center space-y-4">
@@ -472,6 +551,20 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
               )}
             </div>
           </div>
+
+          {/* Audio Debug Info */}
+          {debugInfo.length > 0 && (
+            <details className="text-left">
+              <summary className="text-sm text-gray-600 cursor-pointer">Show Audio Debug Info</summary>
+              <div className="bg-gray-50 border rounded-lg p-3 mt-2 max-h-40 overflow-y-auto">
+                {debugInfo.map((info, index) => (
+                  <p key={index} className="text-xs text-gray-600 font-mono">
+                    {info}
+                  </p>
+                ))}
+              </div>
+            </details>
+          )}
 
           <Button
             onClick={generateSyncedVideo}
