@@ -335,10 +335,13 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           chunks.push(event.data)
+          console.log(`📦 Chunk ${chunks.length}: ${event.data.size} bytes`)
         }
       }
 
       mediaRecorder.onstop = async () => {
+        console.log(`🎬 Recording stopped with ${chunks.length} chunks`)
+
         if (audioContext) {
           try {
             await audioContext.close()
@@ -349,11 +352,18 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
 
         try {
           if (chunks.length === 0) {
-            throw new Error("No video data recorded")
+            throw new Error("No video data recorded - recording may have failed")
           }
 
           setCurrentStep("Creating synchronized video file...")
           setProgress(95)
+
+          const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0)
+          console.log(`📊 Total video data: ${totalSize} bytes from ${chunks.length} chunks`)
+
+          if (totalSize === 0) {
+            throw new Error("All video chunks are empty - no video data captured")
+          }
 
           const videoBlob = new Blob(chunks, { type: selectedType })
           const videoUrl = URL.createObjectURL(videoBlob)
@@ -362,23 +372,46 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
           onVideoGenerated(videoUrl)
           setCurrentStep("Synchronized video generated!")
           setProgress(100)
+          console.log("✅ Video generation completed successfully")
         } catch (error) {
+          console.error("❌ Video creation failed:", error)
           onError(error instanceof Error ? error.message : "Video creation failed")
         } finally {
           setIsGenerating(false)
         }
       }
 
-      mediaRecorder.onerror = () => {
-        onError("Video recording failed")
+      mediaRecorder.onerror = (event) => {
+        console.error("❌ MediaRecorder error:", event)
+        onError("Video recording failed - MediaRecorder error")
         setIsGenerating(false)
       }
 
-      // Start recording
-      setCurrentStep("Recording synchronized video...")
-      setProgress(55)
-
+      // Start recording with timeout safety
       mediaRecorder.start(100)
+
+      // Safety timeout to prevent infinite generation
+      const safetyTimeout = setTimeout(
+        () => {
+          console.warn("⚠️ Video generation timeout - forcing completion")
+          if (audioElement) {
+            audioElement.pause()
+          }
+          if (mediaRecorder.state === "recording") {
+            mediaRecorder.stop()
+          }
+        },
+        (actualAudioDuration + 10) * 1000,
+      ) // Audio duration + 10 second buffer
+
+      // Clear timeout when recording completes
+      const originalOnStop = mediaRecorder.onstop
+      mediaRecorder.onstop = (event) => {
+        clearTimeout(safetyTimeout)
+        if (originalOnStop) {
+          originalOnStop.call(mediaRecorder, event)
+        }
+      }
 
       // Start audio and begin synchronized animation
       audioElement.currentTime = 0
@@ -387,28 +420,33 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
 
       console.log("🎵 Audio playback started, beginning synchronized animation")
 
-      // Animation loop with precise audio synchronization
+      // Animation loop with precise audio synchronization and proper completion handling
       const animate = () => {
-        const elapsed = (Date.now() - audioStartTime) / 1000 // Elapsed time in seconds
-        const audioCurrentTime = audioElement.currentTime // Actual audio position
+        const elapsed = (Date.now() - audioStartTime) / 1000
+        const audioCurrentTime = audioElement.currentTime
 
-        // Use audio current time for more accurate sync
-        const syncTime = audioCurrentTime
+        // Use the more reliable time source
+        const syncTime = Math.max(elapsed, audioCurrentTime)
 
-        if (syncTime >= actualAudioDuration || audioElement.ended) {
+        // Add safety check to prevent infinite loop
+        if (syncTime >= actualAudioDuration || audioElement.ended || audioElement.paused) {
+          console.log("🏁 Animation completion detected")
           audioElement.pause()
-          mediaRecorder.stop()
-          console.log("🏁 Synchronized recording completed")
+
+          // Add small delay before stopping recorder to ensure all data is captured
+          setTimeout(() => {
+            if (mediaRecorder.state === "recording") {
+              mediaRecorder.stop()
+            }
+          }, 500)
           return
         }
 
-        // Calculate current image based on time
-        const imageIndex = Math.min(
-          Math.floor(syncTime / (actualAudioDuration / loadedImages.length)),
-          loadedImages.length - 1,
-        )
+        // Calculate current image with bounds checking
+        const imageProgress = Math.min(syncTime / actualAudioDuration, 1)
+        const imageIndex = Math.min(Math.floor(imageProgress * loadedImages.length), loadedImages.length - 1)
 
-        // Find current caption using AUDIO TIME (not elapsed time)
+        // Find current caption with better timing
         const currentCaptionChunk = syncedCaptions.find(
           (caption) => syncTime >= caption.startTime && syncTime < caption.endTime,
         )
@@ -416,67 +454,81 @@ export function SyncedVideoGenerator({ config, onVideoGenerated, onError }: Sync
         if (currentCaptionChunk) {
           setCurrentCaption(currentCaptionChunk.text)
         } else {
-          setCurrentCaption("") // No caption during this time
+          setCurrentCaption("")
         }
 
-        // Draw current image
-        const img = loadedImages[imageIndex]
-        if (img) {
-          // Clear canvas
-          ctx.fillStyle = "#000000"
-          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        // Draw current image with error handling
+        try {
+          const img = loadedImages[imageIndex]
+          if (img && img.complete) {
+            // Clear canvas
+            ctx.fillStyle = "#000000"
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-          // Draw image
-          const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
-          const scaledWidth = img.width * scale
-          const scaledHeight = img.height * scale
-          const x = (canvas.width - scaledWidth) / 2
-          const y = (canvas.height - scaledHeight) / 2
+            // Draw image
+            const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
+            const scaledWidth = img.width * scale
+            const scaledHeight = img.height * scale
+            const x = (canvas.width - scaledWidth) / 2
+            const y = (canvas.height - scaledHeight) / 2
 
-          ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+            ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-          // Draw synchronized captions
-          if (currentCaptionChunk) {
-            drawSyncedCaption(ctx, currentCaptionChunk.text, canvas)
+            // Draw synchronized captions
+            if (currentCaptionChunk) {
+              drawSyncedCaption(ctx, currentCaptionChunk.text, canvas)
+            }
+
+            // Property info overlay
+            const overlayGradient = ctx.createLinearGradient(0, 0, 0, 100)
+            overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.8)")
+            overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.4)")
+            ctx.fillStyle = overlayGradient
+            ctx.fillRect(0, 0, canvas.width, 100)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "bold 18px Arial"
+            ctx.textAlign = "left"
+            ctx.fillText(config.property.address, 20, 30)
+
+            ctx.fillStyle = "#FFD700"
+            ctx.font = "bold 16px Arial"
+            ctx.fillText(`$${config.property.price.toLocaleString()}`, 20, 50)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "14px Arial"
+            ctx.fillText(
+              `${config.property.bedrooms}BR • ${config.property.bathrooms}BA • ${config.property.sqft.toLocaleString()} sqft`,
+              20,
+              70,
+            )
+
+            // Sync indicator
+            ctx.fillStyle = "#00FF00"
+            ctx.font = "bold 12px Arial"
+            ctx.textAlign = "right"
+            ctx.fillText(`♪ SYNCED ${syncTime.toFixed(1)}s`, canvas.width - 20, 85)
           }
-
-          // Property info overlay
-          const overlayGradient = ctx.createLinearGradient(0, 0, 0, 100)
-          overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.8)")
-          overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.4)")
-          ctx.fillStyle = overlayGradient
-          ctx.fillRect(0, 0, canvas.width, 100)
-
-          ctx.fillStyle = "#FFFFFF"
-          ctx.font = "bold 18px Arial"
-          ctx.textAlign = "left"
-          ctx.fillText(config.property.address, 20, 30)
-
-          ctx.fillStyle = "#FFD700"
-          ctx.font = "bold 16px Arial"
-          ctx.fillText(`$${config.property.price.toLocaleString()}`, 20, 50)
-
-          ctx.fillStyle = "#FFFFFF"
-          ctx.font = "14px Arial"
-          ctx.fillText(
-            `${config.property.bedrooms}BR • ${config.property.bathrooms}BA • ${config.property.sqft.toLocaleString()} sqft`,
-            20,
-            70,
-          )
-
-          // Sync indicator
-          ctx.fillStyle = "#00FF00"
-          ctx.font = "bold 12px Arial"
-          ctx.textAlign = "right"
-          ctx.fillText(`♪ SYNCED ${syncTime.toFixed(1)}s`, canvas.width - 20, 85)
+        } catch (drawError) {
+          console.warn("Drawing error:", drawError)
         }
 
-        // Update progress based on audio time
-        const recordingProgress = 55 + (syncTime / actualAudioDuration) * 40
+        // Update progress with safety bounds
+        const recordingProgress = Math.min(55 + (syncTime / actualAudioDuration) * 40, 95)
         setProgress(recordingProgress)
         setCurrentStep(`Recording: ${syncTime.toFixed(1)}s / ${actualAudioDuration.toFixed(1)}s (SYNCED)`)
 
-        animationRef.current = requestAnimationFrame(animate)
+        // Continue animation with error handling
+        try {
+          animationRef.current = requestAnimationFrame(animate)
+        } catch (animError) {
+          console.error("Animation frame error:", animError)
+          // Force completion if animation fails
+          audioElement.pause()
+          if (mediaRecorder.state === "recording") {
+            mediaRecorder.stop()
+          }
+        }
       }
 
       animate()
