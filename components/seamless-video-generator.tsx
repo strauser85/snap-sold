@@ -281,24 +281,28 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(60)
 
-      // Step 5: Setup SILENT audio capture
-      console.log("🔇 Setting up SILENT audio capture...")
+      // Step 5: Setup PROPER audio capture (NOT silent - audio must be captured)
+      console.log("🎵 Setting up PROPER audio capture for embedding...")
 
       // Create canvas stream
       const canvasStream = canvas.captureStream(30)
 
-      // Create audio context for SILENT capture
+      // Create audio context for PROPER capture
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
 
-      // Create audio source from the MUTED audio element
+      // IMPORTANT: Audio must NOT be muted for proper capture
+      audio.muted = false // Audio must be unmuted for capture
+      audio.volume = 0.1 // Low volume but not muted
+
+      // Create audio source from the audio element
       const audioSource = audioContext.createMediaElementSource(audio)
 
       // Create destination for capturing audio
       const audioDestination = audioContext.createMediaStreamDestination()
 
-      // Connect audio source ONLY to destination (NOT to speakers)
+      // Connect audio source to destination for capture
       audioSource.connect(audioDestination)
-      // DO NOT connect to audioContext.destination - this prevents audio playback
+      // DO NOT connect to speakers to avoid feedback
 
       // Create combined stream with both video and audio
       const combinedStream = new MediaStream()
@@ -308,18 +312,19 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         combinedStream.addTrack(track)
       })
 
-      // Add audio track (will be silent during generation but embedded in video)
+      // Add audio track for embedding
       audioDestination.stream.getAudioTracks().forEach((track) => {
         combinedStream.addTrack(track)
+        console.log(`🎵 Audio track added: ${track.kind}, enabled: ${track.enabled}`)
       })
 
-      console.log(`🔇 SILENT combined stream tracks: ${combinedStream.getTracks().length}`)
+      console.log(`🎵 Combined stream tracks: ${combinedStream.getTracks().length}`)
       console.log(`📹 Video tracks: ${combinedStream.getVideoTracks().length}`)
-      console.log(`🔊 Audio tracks (silent): ${combinedStream.getAudioTracks().length}`)
+      console.log(`🔊 Audio tracks: ${combinedStream.getAudioTracks().length}`)
 
-      // Use MediaRecorder with the combined stream
+      // Use MediaRecorder with PROPER audio/video codec
       const mediaRecorder = new MediaRecorder(combinedStream, {
-        mimeType: "video/webm;codecs=vp8,opus",
+        mimeType: "video/webm;codecs=vp8,opus", // VP8 + Opus for better compatibility
         videoBitsPerSecond: 2000000,
         audioBitsPerSecond: 128000,
       })
@@ -386,13 +391,13 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       console.log("🎬 Starting SILENT MediaRecorder...")
       mediaRecorder.start(100)
 
-      // Start MUTED audio playback (for timing sync only - NO SOUND)
+      // Start audio playback for capture (low volume but NOT muted)
       audio.currentTime = 0
-      audio.muted = true // Ensure it stays muted
-      audio.volume = 0 // Double ensure no sound
+      audio.muted = false // Must be unmuted for capture
+      audio.volume = 0.1 // Low volume to avoid disturbing user
       await audio.play()
 
-      console.log("🔇 MUTED audio playback started (silent - for timing only)")
+      console.log("🎵 Audio playback started for capture (low volume)")
 
       // Animation loop
       const startTime = Date.now()
