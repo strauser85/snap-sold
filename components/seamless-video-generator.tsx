@@ -37,7 +37,25 @@ interface HighlightCaption {
   text: string
   startTime: number
   endTime: number
-  priority: number // 1-5, higher = more important
+  priority: number
+}
+
+interface ImageDisplayPlan {
+  imageUrl: string
+  startTime: number
+  endTime: number
+  duration: number
+  isReused: boolean
+  priority: number
+}
+
+interface CaptionRenderInfo {
+  fontSize: number
+  lines: string[]
+  x: number
+  y: number
+  autoScaled: boolean
+  maxWidth: number
 }
 
 export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError }: SeamlessVideoGeneratorProps) {
@@ -48,6 +66,12 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   const animationRef = useRef<number | null>(null)
 
   const [progress, setProgress] = useState(0)
+  const [debugInfo, setDebugInfo] = useState<string[]>([])
+
+  const addDebugInfo = useCallback((info: string) => {
+    console.log("🔧 DEBUG:", info)
+    setDebugInfo((prev) => [...prev.slice(-10), `${new Date().toLocaleTimeString()}: ${info}`])
+  }, [])
 
   const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -59,144 +83,113 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     })
   }, [])
 
-  const createAccurateWordTimings = useCallback((script: string, totalDuration: number): WordTiming[] => {
-    const words = script
-      .replace(/[^\w\s.,!?'-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(/\s+/)
-      .filter((word) => word.length > 0)
+  // SMART IMAGE PRIORITIZATION AND TIMING
+  const createImageDisplayPlan = useCallback(
+    (imageUrls: string[], totalDuration: number): ImageDisplayPlan[] => {
+      const imageCount = imageUrls.length
+      addDebugInfo(`📸 Planning display for ${imageCount} images over ${totalDuration.toFixed(1)}s`)
 
-    const wordTimings: WordTiming[] = []
-    let currentTime = 0.1 // Minimal delay - ElevenLabs starts speaking almost immediately
+      const displayPlan: ImageDisplayPlan[] = []
 
-    words.forEach((word, index) => {
-      let wordDuration = 0.35 // Base duration for average word
+      if (imageCount < 10) {
+        // UNDER 10 PHOTOS: Extend display time and reuse key images
+        addDebugInfo(`📸 Under 10 photos detected - extending display time and reusing key images`)
 
-      if (word.length <= 3)
-        wordDuration = 0.25 // Short words
-      else if (word.length <= 6)
-        wordDuration = 0.35 // Medium words
-      else if (word.length <= 10)
-        wordDuration = 0.45 // Long words
-      else wordDuration = 0.6 // Very long words
+        const baseTimePerImage = totalDuration / Math.max(imageCount, 8) // Minimum 8 image slots
 
-      if (word.includes(",")) wordDuration += 0.2
-      if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4
+        // Identify key images (assume first few are most important)
+        const keyImageIndices = [0, 1, 2] // Front, kitchen, living room typically
 
-      if (/\d/.test(word)) wordDuration += 0.15
+        let currentTime = 0
+        let imageIndex = 0
 
-      if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) {
-        wordDuration += 0.1
-      }
+        while (currentTime < totalDuration) {
+          const remainingTime = totalDuration - currentTime
+          const remainingSlots = Math.ceil(remainingTime / baseTimePerImage)
+          const timeForThisImage = Math.min(baseTimePerImage, remainingTime)
 
-      wordTimings.push({
-        word: word,
-        startTime: currentTime,
-        endTime: currentTime + wordDuration,
-      })
+          const actualImageIndex = imageIndex % imageCount
+          const isReused = imageIndex >= imageCount
 
-      currentTime += wordDuration + 0.05
-    })
-
-    const totalCalculatedTime = currentTime
-    const scaleFactor = totalDuration / totalCalculatedTime
-
-    return wordTimings.map((timing) => ({
-      ...timing,
-      startTime: timing.startTime * scaleFactor,
-      endTime: timing.endTime * scaleFactor,
-    }))
-  }, [])
-
-  const createSyncedCaptions = useCallback((wordTimings: WordTiming[]): CaptionChunk[] => {
-    const captions: CaptionChunk[] = []
-    let currentPhrase: WordTiming[] = []
-
-    wordTimings.forEach((wordTiming, index) => {
-      currentPhrase.push(wordTiming)
-
-      const isEndOfSentence = wordTiming.word.match(/[.!?]$/)
-      const isCommaBreak = wordTiming.word.includes(",")
-      const isPhraseLength = currentPhrase.length >= 3
-      const isLastWord = index === wordTimings.length - 1
-
-      if (isEndOfSentence || isPhraseLength || (isCommaBreak && currentPhrase.length >= 2) || isLastWord) {
-        if (currentPhrase.length > 0) {
-          captions.push({
-            text: currentPhrase
-              .map((w) => w.word)
-              .join(" ")
-              .toUpperCase(),
-            words: [...currentPhrase],
-            startTime: currentPhrase[0].startTime,
-            endTime: currentPhrase[currentPhrase.length - 1].endTime,
+          displayPlan.push({
+            imageUrl: imageUrls[actualImageIndex],
+            startTime: currentTime,
+            endTime: currentTime + timeForThisImage,
+            duration: timeForThisImage,
+            isReused,
+            priority: keyImageIndices.includes(actualImageIndex) ? 5 : 3,
           })
-          currentPhrase = []
+
+          currentTime += timeForThisImage
+          imageIndex++
+
+          if (currentTime >= totalDuration) break
         }
-      }
-    })
+      } else if (imageCount >= 20 && imageCount <= 30) {
+        // IDEAL CASE: 20-30 photos, space evenly
+        addDebugInfo(`📸 Ideal photo count (${imageCount}) - spacing evenly`)
 
-    return captions
-  }, [])
+        const timePerImage = totalDuration / imageCount
 
-  const drawSyncedCaption = useCallback(
-    (
-      ctx: CanvasRenderingContext2D,
-      text: string,
-      canvas: HTMLCanvasElement,
-      currentTime: number,
-      captionData: CaptionChunk,
-    ) => {
-      if (!text) return
+        imageUrls.forEach((url, index) => {
+          displayPlan.push({
+            imageUrl: url,
+            startTime: index * timePerImage,
+            endTime: (index + 1) * timePerImage,
+            duration: timePerImage,
+            isReused: false,
+            priority: 3,
+          })
+        })
+      } else if (imageCount > 30) {
+        // TOO MANY PHOTOS: Prioritize and compress
+        addDebugInfo(`📸 Too many photos (${imageCount}) - prioritizing key images`)
 
-      let visibleText = ""
-      if (captionData.words) {
-        captionData.words.forEach((wordTiming) => {
-          if (currentTime >= wordTiming.startTime && currentTime <= wordTiming.endTime + 0.1) {
-            visibleText += wordTiming.word + " "
-          }
+        // Prioritize key images (first 20-25 images, assuming they're ordered by importance)
+        const maxImagesToShow = Math.min(25, Math.floor(totalDuration / 2)) // Min 2s per image
+        const selectedImages = imageUrls.slice(0, maxImagesToShow)
+        const timePerImage = totalDuration / selectedImages.length
+
+        selectedImages.forEach((url, index) => {
+          displayPlan.push({
+            imageUrl: url,
+            startTime: index * timePerImage,
+            endTime: (index + 1) * timePerImage,
+            duration: timePerImage,
+            isReused: false,
+            priority: index < 10 ? 5 : 3, // First 10 are high priority
+          })
+        })
+      } else {
+        // DEFAULT CASE: Space evenly
+        const timePerImage = totalDuration / imageCount
+
+        imageUrls.forEach((url, index) => {
+          displayPlan.push({
+            imageUrl: url,
+            startTime: index * timePerImage,
+            endTime: (index + 1) * timePerImage,
+            duration: timePerImage,
+            isReused: false,
+            priority: 3,
+          })
         })
       }
 
-      if (!visibleText.trim()) return
+      // Log the final plan
+      addDebugInfo(`📸 Final plan: ${displayPlan.length} image slots`)
+      addDebugInfo(`📸 Average time per image: ${(totalDuration / displayPlan.length).toFixed(1)}s`)
+      addDebugInfo(`📸 Reused images: ${displayPlan.filter((p) => p.isReused).length}`)
 
-      const fontSize = Math.floor(canvas.width * 0.08)
-      ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
-      ctx.textAlign = "center"
-
-      const words = visibleText.trim().split(" ")
-      const lines: string[] = []
-      for (let i = 0; i < words.length; i += 3) {
-        lines.push(words.slice(i, i + 3).join(" "))
-      }
-
-      const lineHeight = fontSize * 1.4
-      const startY = canvas.height * 0.72
-
-      lines.forEach((line, lineIndex) => {
-        const y = startY + lineIndex * lineHeight
-
-        const textMetrics = ctx.measureText(line)
-        const textWidth = textMetrics.width
-        const padding = fontSize * 0.5
-        const boxWidth = textWidth + padding * 2
-        const boxHeight = fontSize + padding
-        const boxX = (canvas.width - boxWidth) / 2
-        const boxY = y - fontSize * 0.9
-
-        ctx.fillStyle = "rgba(0, 0, 0, 0.9)"
-        ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
-
-        ctx.strokeStyle = "#000000"
-        ctx.lineWidth = Math.floor(fontSize * 0.15)
-        ctx.strokeText(line, canvas.width / 2, y)
-
-        ctx.fillStyle = "#FFFF00"
-        ctx.fillText(line, canvas.width / 2, y)
+      displayPlan.forEach((plan, index) => {
+        console.log(
+          `📸 Image ${index + 1}: ${plan.duration.toFixed(1)}s ${plan.isReused ? "(REUSED)" : ""} Priority: ${plan.priority}`,
+        )
       })
+
+      return displayPlan
     },
-    [],
+    [addDebugInfo],
   )
 
   const extractHighlightCaptions = useCallback(
@@ -204,7 +197,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const highlights: HighlightCaption[] = []
       const scriptLower = script.toLowerCase()
 
-      console.log("🎯 Extracting key highlights from script...")
+      addDebugInfo("🎯 Extracting key highlights from script...")
 
       if (scriptLower.includes("attention") || scriptLower.includes("stop") || scriptLower.includes("look")) {
         highlights.push({
@@ -316,91 +309,180 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         })
       }
 
-      console.log(`✅ Created ${highlights.length} highlight captions:`)
+      addDebugInfo(`✅ Created ${highlights.length} highlight captions`)
       highlights.forEach((h, i) => {
-        console.log(`   ${i + 1}. "${h.text}" (${h.startTime.toFixed(1)}s - ${h.endTime.toFixed(1)}s)`)
+        addDebugInfo(`   ${i + 1}. "${h.text}" (${h.startTime.toFixed(1)}s - ${h.endTime.toFixed(1)}s)`)
       })
 
       return highlights
     },
-    [propertyData],
+    [propertyData, addDebugInfo],
+  )
+
+  // SMART CAPTION RENDERING WITH AUTO-SCALING
+  const calculateCaptionRenderInfo = useCallback(
+    (ctx: CanvasRenderingContext2D, text: string, canvas: HTMLCanvasElement, priority: number): CaptionRenderInfo => {
+      const maxWidth = canvas.width * 0.9 // 90% of video width
+      const bottomPadding = canvas.height * 0.08 // 8% padding from bottom
+
+      // Base font size based on priority and text length
+      let baseFontSize = Math.floor(canvas.width * 0.09)
+      if (priority >= 5) baseFontSize = Math.floor(canvas.width * 0.11)
+      if (text.length > 25) baseFontSize = Math.floor(canvas.width * 0.07)
+      if (text.length > 40) baseFontSize = Math.floor(canvas.width * 0.06)
+
+      let fontSize = baseFontSize
+      let autoScaled = false
+
+      // Test if text fits at base size
+      ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
+      let textWidth = ctx.measureText(text).width
+
+      // Auto-scale down if too wide
+      while (textWidth > maxWidth && fontSize > canvas.width * 0.04) {
+        fontSize -= 2
+        ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
+        textWidth = ctx.measureText(text).width
+        autoScaled = true
+      }
+
+      // Smart line breaking
+      const words = text.split(" ")
+      const lines: string[] = []
+
+      if (textWidth <= maxWidth) {
+        // Single line fits
+        lines.push(text)
+      } else {
+        // Multi-line breaking
+        let currentLine = ""
+
+        for (const word of words) {
+          const testLine = currentLine + (currentLine ? " " : "") + word
+          const testWidth = ctx.measureText(testLine).width
+
+          if (testWidth <= maxWidth) {
+            currentLine = testLine
+          } else {
+            if (currentLine) {
+              lines.push(currentLine)
+              currentLine = word
+            } else {
+              // Single word too long, force it
+              lines.push(word)
+            }
+          }
+        }
+
+        if (currentLine) {
+          lines.push(currentLine)
+        }
+
+        // Avoid single words on their own line (except if stylistic)
+        if (lines.length > 1 && lines[lines.length - 1].split(" ").length === 1 && lines.length > 2) {
+          const lastWord = lines.pop()!
+          lines[lines.length - 1] += " " + lastWord
+        }
+      }
+
+      // Calculate positioning
+      const lineHeight = fontSize * 1.3
+      const totalTextHeight = lines.length * lineHeight
+      const startY = canvas.height - bottomPadding - totalTextHeight + lineHeight * 0.8
+
+      return {
+        fontSize,
+        lines,
+        x: canvas.width / 2,
+        y: startY,
+        autoScaled,
+        maxWidth,
+      }
+    },
+    [],
   )
 
   const drawHighlightCaption = useCallback(
     (ctx: CanvasRenderingContext2D, caption: HighlightCaption, canvas: HTMLCanvasElement, currentTime: number) => {
-      const { text, startTime, endTime } = caption
+      const { text, startTime, endTime, priority } = caption
 
+      // Calculate opacity with fade in/out
       let opacity = 1
-
       if (currentTime < startTime + 0.5) {
         opacity = (currentTime - startTime) / 0.5
       } else if (currentTime > endTime - 0.5) {
         opacity = (endTime - currentTime) / 0.5
       }
-
       opacity = Math.max(0, Math.min(1, opacity))
 
       if (opacity <= 0) return
 
-      let fontSize = Math.floor(canvas.width * 0.09)
+      // Get smart rendering info
+      const renderInfo = calculateCaptionRenderInfo(ctx, text, canvas, priority)
 
-      if (text.length > 25) fontSize = Math.floor(canvas.width * 0.07)
-      if (caption.priority >= 5) fontSize = Math.floor(canvas.width * 0.1)
+      // Debug logging
+      addDebugInfo(
+        `📝 Caption: "${text.substring(0, 20)}..." Font: ${renderInfo.fontSize}px ${renderInfo.autoScaled ? "(AUTO-SCALED)" : ""} Lines: ${renderInfo.lines.length}`,
+      )
 
-      ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
+      // Set font
+      ctx.font = `900 ${renderInfo.fontSize}px "Arial Black", Arial, sans-serif`
       ctx.textAlign = "center"
 
-      const words = text.split(" ")
-      const lines: string[] = []
+      // Draw each line
+      renderInfo.lines.forEach((line, lineIndex) => {
+        const y = renderInfo.y + lineIndex * (renderInfo.fontSize * 1.3)
 
-      if (words.length <= 4) {
-        lines.push(text)
-      } else {
-        const midPoint = Math.ceil(words.length / 2)
-        lines.push(words.slice(0, midPoint).join(" "))
-        lines.push(words.slice(midPoint).join(" "))
-      }
-
-      const lineHeight = fontSize * 1.3
-      const totalTextHeight = lines.length * lineHeight
-
-      const startY = canvas.height * 0.75
-
-      lines.forEach((line, lineIndex) => {
-        const y = startY + lineIndex * lineHeight
-
+        // Background box for readability
         const textMetrics = ctx.measureText(line)
         const textWidth = textMetrics.width
-        const padding = fontSize * 0.6
+        const padding = renderInfo.fontSize * 0.6
         const boxWidth = textWidth + padding * 2
-        const boxHeight = fontSize + padding
+        const boxHeight = renderInfo.fontSize + padding
         const boxX = (canvas.width - boxWidth) / 2
-        const boxY = y - fontSize * 0.9
+        const boxY = y - renderInfo.fontSize * 0.9
 
+        // Semi-transparent black background
         ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * opacity})`
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
+        // Multiple stroke layers for depth
         ctx.strokeStyle = `rgba(0, 0, 0, ${opacity})`
-        ctx.lineWidth = Math.floor(fontSize * 0.2)
-        ctx.strokeText(line, canvas.width / 2, y)
+        ctx.lineWidth = Math.floor(renderInfo.fontSize * 0.2)
+        ctx.strokeText(line, renderInfo.x, y)
 
+        // Secondary shadow
         ctx.strokeStyle = `rgba(0, 0, 0, ${0.7 * opacity})`
-        ctx.lineWidth = Math.floor(fontSize * 0.1)
-        ctx.strokeText(line, canvas.width / 2 + 3, y + 3)
+        ctx.lineWidth = Math.floor(renderInfo.fontSize * 0.1)
+        ctx.strokeText(line, renderInfo.x + 3, y + 3)
 
+        // Main bright yellow text
         ctx.fillStyle = `rgba(255, 255, 0, ${opacity})`
-        ctx.fillText(line, canvas.width / 2, y)
+        ctx.fillText(line, renderInfo.x, y)
 
-        if (caption.priority >= 4) {
+        // High priority glow effect
+        if (priority >= 4) {
           ctx.shadowColor = `rgba(255, 255, 0, ${0.5 * opacity})`
           ctx.shadowBlur = 10
           ctx.fillStyle = `rgba(255, 255, 255, ${0.8 * opacity})`
-          ctx.fillText(line, canvas.width / 2, y)
+          ctx.fillText(line, renderInfo.x, y)
           ctx.shadowBlur = 0
         }
       })
+
+      // Debug overlay (only during development)
+      if (process.env.NODE_ENV === "development") {
+        ctx.strokeStyle = `rgba(255, 0, 0, ${0.3 * opacity})`
+        ctx.lineWidth = 1
+        ctx.strokeRect(
+          renderInfo.x - renderInfo.maxWidth / 2,
+          renderInfo.y - renderInfo.fontSize,
+          renderInfo.maxWidth,
+          renderInfo.lines.length * renderInfo.fontSize * 1.3,
+        )
+      }
     },
-    [],
+    [calculateCaptionRenderInfo, addDebugInfo],
   )
 
   const generateAudio = useCallback(
@@ -436,7 +518,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.width = 576
       canvas.height = 1024
 
-      console.log("🎬 Starting video generation with HIGHLIGHT CAPTIONS")
+      addDebugInfo("🎬 Starting SMART video generation with dynamic image timing")
 
       const audioData = await generateAudio(propertyData.script)
       setProgress(20)
@@ -445,7 +527,10 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("Failed to generate audio")
       }
 
-      console.log(`🎵 Audio duration: ${audioData.duration}s`)
+      addDebugInfo(`🎵 Audio duration: ${audioData.duration}s`)
+
+      // Create smart image display plan
+      const imageDisplayPlan = createImageDisplayPlan(propertyData.imageUrls, audioData.duration)
 
       const audio = audioRef.current!
       audio.src = audioData.audioUrl
@@ -456,7 +541,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       await new Promise((resolve, reject) => {
         audio.oncanplaythrough = () => {
-          console.log("✅ Audio loaded and ready at FULL VOLUME")
+          addDebugInfo("✅ Audio loaded and ready at FULL VOLUME")
           resolve(null)
         }
         audio.onerror = reject
@@ -469,51 +554,45 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(40)
 
-      const loadedImages: HTMLImageElement[] = []
-      for (let i = 0; i < propertyData.imageUrls.length; i++) {
+      // Load images according to display plan
+      const loadedImages: { [key: string]: HTMLImageElement } = {}
+      const uniqueImageUrls = [...new Set(imageDisplayPlan.map((plan) => plan.imageUrl))]
+
+      for (let i = 0; i < uniqueImageUrls.length; i++) {
         try {
-          const img = await loadImage(propertyData.imageUrls[i])
-          loadedImages.push(img)
-          setProgress(40 + (i / propertyData.imageUrls.length) * 20)
+          const img = await loadImage(uniqueImageUrls[i])
+          loadedImages[uniqueImageUrls[i]] = img
+          setProgress(40 + (i / uniqueImageUrls.length) * 20)
         } catch (error) {
-          console.warn(`Failed to load image ${i + 1}:`, error)
+          addDebugInfo(`⚠️ Failed to load image ${i + 1}: ${error}`)
         }
       }
 
-      if (loadedImages.length === 0) {
+      if (Object.keys(loadedImages).length === 0) {
         throw new Error("No images could be loaded")
       }
+
+      addDebugInfo(`✅ Loaded ${Object.keys(loadedImages).length} unique images`)
 
       setProgress(60)
 
       const canvasStream = canvas.captureStream(30)
-
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-
       const audioSource = audioContext.createMediaElementSource(audio)
-
       const gainNode = audioContext.createGain()
       gainNode.gain.value = 2.0
-
       const audioDestination = audioContext.createMediaStreamDestination()
 
       audioSource.connect(gainNode)
       gainNode.connect(audioDestination)
 
       const combinedStream = new MediaStream()
-
       canvasStream.getVideoTracks().forEach((track) => {
         combinedStream.addTrack(track)
       })
-
       audioDestination.stream.getAudioTracks().forEach((track) => {
         combinedStream.addTrack(track)
-        console.log(`🔊 BOOSTED audio track added: enabled=${track.enabled}`)
       })
-
-      console.log(
-        `🎵 Stream setup: ${combinedStream.getVideoTracks().length} video, ${combinedStream.getAudioTracks().length} audio`,
-      )
 
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: "video/webm;codecs=vp9,opus",
@@ -533,7 +612,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       mediaRecorder.onstop = async () => {
-        console.log(`🏁 Recording complete: ${chunksRef.current.length} chunks`)
+        addDebugInfo(`🏁 Recording complete: ${chunksRef.current.length} chunks`)
 
         try {
           await audioContext.close()
@@ -552,7 +631,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
             type: "video/webm",
           })
 
-          console.log(`✅ PERFECT video created: ${videoBlob.size} bytes with HIGHLIGHT CAPTIONS`)
+          addDebugInfo(`✅ SMART video created: ${videoBlob.size} bytes with optimized image timing`)
 
           const videoUrl = URL.createObjectURL(videoBlob)
           setProgress(100)
@@ -571,77 +650,81 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       setProgress(75)
 
-      console.log("🎬 Starting SYNCHRONIZED recording...")
+      addDebugInfo("🎬 Starting SYNCHRONIZED recording with smart image timing...")
 
       mediaRecorder.start(100)
-
       await new Promise((resolve) => setTimeout(resolve, 100))
 
       audio.currentTime = 0
       await audio.play()
 
-      console.log("🎵 Audio and video recording started SIMULTANEOUSLY")
+      addDebugInfo("🎵 Audio and video recording started SIMULTANEOUSLY")
 
       const recordingStartTime = Date.now()
       const durationMs = audioData.duration * 1000
-      const timePerImageMs = Math.max(3000, Math.floor(durationMs / loadedImages.length))
 
       const animate = () => {
         const elapsed = Date.now() - recordingStartTime
         const elapsedSeconds = elapsed / 1000
 
         if (elapsed >= durationMs) {
-          console.log("🏁 Animation complete - stopping recording")
+          addDebugInfo("🏁 Animation complete - stopping recording")
           audio.pause()
           mediaRecorder.stop()
           return
         }
 
-        const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
+        // Find current image based on smart display plan
+        const currentImagePlan = imageDisplayPlan.find(
+          (plan) => elapsedSeconds >= plan.startTime && elapsedSeconds < plan.endTime,
+        )
 
         const currentHighlight = highlightCaptions.find(
           (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds < caption.endTime,
         )
 
-        const img = loadedImages[imageIndex]
-        if (img && img.complete) {
-          ctx.fillStyle = "#000000"
-          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        if (currentImagePlan) {
+          const img = loadedImages[currentImagePlan.imageUrl]
+          if (img && img.complete) {
+            ctx.fillStyle = "#000000"
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-          const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
-          const scaledWidth = img.width * scale
-          const scaledHeight = img.height * scale
-          const x = (canvas.width - scaledWidth) / 2
-          const y = (canvas.height - scaledHeight) / 2
+            const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
+            const scaledWidth = img.width * scale
+            const scaledHeight = img.height * scale
+            const x = (canvas.width - scaledWidth) / 2
+            const y = (canvas.height - scaledHeight) / 2
 
-          ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+            ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-          if (currentHighlight) {
-            drawHighlightCaption(ctx, currentHighlight, canvas, elapsedSeconds)
+            if (currentHighlight) {
+              drawHighlightCaption(ctx, currentHighlight, canvas, elapsedSeconds)
+            }
+
+            // Property overlay
+            const overlayGradient = ctx.createLinearGradient(0, 0, 0, 100)
+            overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.9)")
+            overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.3)")
+            ctx.fillStyle = overlayGradient
+            ctx.fillRect(0, 0, canvas.width, 100)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "bold 18px Arial"
+            ctx.textAlign = "left"
+            ctx.fillText(propertyData.address, 20, 30)
+
+            ctx.fillStyle = "#FFD700"
+            ctx.font = "bold 16px Arial"
+            ctx.fillText(`$${propertyData.price.toLocaleString()}`, 20, 50)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "14px Arial"
+            ctx.fillText(
+              `${propertyData.bedrooms}BR • ${propertyData.bathrooms}BA • ${propertyData.sqft.toLocaleString()} sqft`,
+              20,
+              70,
+            )
           }
-
-          const overlayGradient = ctx.createLinearGradient(0, 0, 0, 100)
-          overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.9)")
-          overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.3)")
-          ctx.fillStyle = overlayGradient
-          ctx.fillRect(0, 0, canvas.width, 100)
-
-          ctx.fillStyle = "#FFFFFF"
-          ctx.font = "bold 18px Arial"
-          ctx.textAlign = "left"
-          ctx.fillText(propertyData.address, 20, 30)
-
-          ctx.fillStyle = "#FFD700"
-          ctx.font = "bold 16px Arial"
-          ctx.fillText(`$${propertyData.price.toLocaleString()}`, 20, 50)
-
-          ctx.fillStyle = "#FFFFFF"
-          ctx.font = "14px Arial"
-          ctx.fillText(
-            `${propertyData.bedrooms}BR • ${propertyData.bathrooms}BA • ${propertyData.sqft.toLocaleString()} sqft`,
-            20,
-            70,
-          )
         }
 
         const recordingProgress = 75 + (elapsed / durationMs) * 20
@@ -652,17 +735,19 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       animate()
     } catch (error) {
-      console.error("❌ PERFECT video generation failed:", error)
+      console.error("❌ SMART video generation failed:", error)
       onError(error instanceof Error ? error.message : "Video generation failed")
     }
   }, [
     propertyData,
     generateAudio,
     loadImage,
+    createImageDisplayPlan,
     extractHighlightCaptions,
     drawHighlightCaption,
     onVideoGenerated,
     onError,
+    addDebugInfo,
   ])
 
   useEffect(() => {
@@ -679,8 +764,24 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           <div className="text-center">
             <div className="text-3xl font-bold text-gray-700 mb-4">{Math.round(progress)}%</div>
             <Progress value={progress} className="h-4" />
-            <p className="text-sm text-gray-500 mt-2">Generating video with HIGHLIGHT CAPTIONS and FULL VOLUME audio</p>
+            <p className="text-sm text-gray-500 mt-2">
+              Generating SMART video with dynamic image timing and auto-scaling captions
+            </p>
           </div>
+
+          {/* Debug Info Panel */}
+          {debugInfo.length > 0 && (
+            <details className="text-left">
+              <summary className="text-sm text-gray-600 cursor-pointer">Show Debug Info</summary>
+              <div className="bg-gray-50 border rounded-lg p-3 mt-2 max-h-60 overflow-y-auto">
+                {debugInfo.map((info, index) => (
+                  <p key={index} className="text-xs text-gray-600 font-mono">
+                    {info}
+                  </p>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       </div>
     </div>
