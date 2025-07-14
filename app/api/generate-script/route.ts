@@ -38,80 +38,163 @@ function sanitizeScript(text: string): string {
   return sanitized
 }
 
-// Comprehensive script sanitization filter
-function sanitizeGeneratedScript(script: string): string {
-  console.log("🧹 Applying final script sanitization filter...")
-  console.log("📝 Original length:", script.length)
+// AGGRESSIVE abbreviation removal and grammar fixing
+function aggressivelyFixAbbreviations(text: string): string {
+  console.log("🔧 AGGRESSIVELY fixing abbreviations and grammar...")
+  console.log("📝 Before fixes:", text.substring(0, 150))
 
-  let cleaned = script
+  let fixed = text
 
-  // Step 1: Remove all emojis and Unicode symbols (comprehensive)
-  cleaned = cleaned.replace(/[\u{1F600}-\u{1F64F}]/gu, "") // Emoticons
-  cleaned = cleaned.replace(/[\u{1F300}-\u{1F5FF}]/gu, "") // Misc Symbols and Pictographs
-  cleaned = cleaned.replace(/[\u{1F680}-\u{1F6FF}]/gu, "") // Transport and Map
-  cleaned = cleaned.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, "") // Regional indicator symbols
-  cleaned = cleaned.replace(/[\u{2600}-\u{26FF}]/gu, "") // Misc symbols
-  cleaned = cleaned.replace(/[\u{2700}-\u{27BF}]/gu, "") // Dingbats
-  cleaned = cleaned.replace(/[\u{1F900}-\u{1F9FF}]/gu, "") // Supplemental Symbols and Pictographs
-  cleaned = cleaned.replace(/[\u{1FA70}-\u{1FAFF}]/gu, "") // Symbols and Pictographs Extended-A
-  cleaned = cleaned.replace(/[\u{FE00}-\u{FE0F}]/gu, "") // Variation Selectors
-  cleaned = cleaned.replace(/[\u{1F000}-\u{1F02F}]/gu, "") // Mahjong Tiles
-  cleaned = cleaned.replace(/[\u{1F0A0}-\u{1F0FF}]/gu, "") // Playing Cards
+  // Fix bedroom abbreviations (all variations)
+  fixed = fixed
+    .replace(/(\d+)\s*BR\b/gi, "$1 bedrooms")
+    .replace(/(\d+)\s*BED\b/gi, "$1 bedrooms")
+    .replace(/(\d+)\s*BDRM\b/gi, "$1 bedrooms")
+    .replace(/(\d+)\s*bedroom\b/gi, "$1 bedrooms") // Make plural
+    .replace(/one\s+bedrooms\b/gi, "one bedroom") // Fix singular
+    .replace(/1\s+bedrooms\b/gi, "one bedroom")
 
-  // Step 2: Remove specific problematic characters
-  cleaned = cleaned.replace(/[🏠🚨💰📱✨🔥⚡💎📈🏃‍♂️💨📞🎵♪]/gu, "")
-  cleaned = cleaned.replace(/[🎬📊📍🖼️📝⏱️🎤🧹]/gu, "")
-  cleaned = cleaned.replace(/[✅❌⚠️🎯🔧📦🔍📡]/gu, "")
+  // Fix bathroom abbreviations (all variations)
+  fixed = fixed
+    .replace(/(\d+(?:\.\d+)?)\s*BA\b/gi, "$1 bathrooms")
+    .replace(/(\d+(?:\.\d+)?)\s*BATH\b/gi, "$1 bathrooms")
+    .replace(/(\d+(?:\.\d+)?)\s*BTH\b/gi, "$1 bathrooms")
+    .replace(/(\d+(?:\.\d+)?)\s*bathroom\b/gi, "$1 bathrooms") // Make plural
+    .replace(/one\s+bathrooms\b/gi, "one bathroom") // Fix singular
+    .replace(/1\s+bathrooms\b/gi, "one bathroom")
+    .replace(/1\.0\s+bathrooms\b/gi, "one bathroom")
 
-  // Step 3: Replace smart quotes and special punctuation
-  cleaned = cleaned.replace(/[""]/g, '"') // Smart double quotes
-  cleaned = cleaned.replace(/['']/g, "'") // Smart single quotes
-  cleaned = cleaned.replace(/[–—]/g, "-") // Em dash, en dash
-  cleaned = cleaned.replace(/[…]/g, "...") // Ellipsis
-  cleaned = cleaned.replace(/[«»]/g, '"') // Guillemets
+  // Fix square feet abbreviations (all variations)
+  fixed = fixed
+    .replace(/(\d+(?:,\d+)*)\s*SQFT\b/gi, "$1 square feet")
+    .replace(/(\d+(?:,\d+)*)\s*SQ\s*FT\b/gi, "$1 square feet")
+    .replace(/(\d+(?:,\d+)*)\s*SF\b/gi, "$1 square feet")
+    .replace(/(\d+(?:,\d+)*)\s*sq\.\s*ft\./gi, "$1 square feet")
 
-  // Step 4: Remove symbols and replace with words
-  cleaned = cleaned.replace(/[®©™]/g, "") // Trademark symbols
-  cleaned = cleaned.replace(/[°]/g, " degrees ") // Degree symbol
-  cleaned = cleaned.replace(/[±]/g, " plus or minus ") // Plus-minus
-  cleaned = cleaned.replace(/[×]/g, " times ") // Multiplication
-  cleaned = cleaned.replace(/[÷]/g, " divided by ") // Division
+  // Fix price abbreviations
+  fixed = fixed
+    .replace(/\$(\d+(?:,\d+)*)\s*K\b/gi, "$1 thousand dollars")
+    .replace(/\$(\d+(?:,\d+)*)\s*M\b/gi, "$1 million dollars")
+    .replace(/(\d+)\s*K\b/gi, "$1 thousand")
+    .replace(/(\d+)\s*M\b/gi, "$1 million")
 
-  // Step 5: Handle currency symbols
-  cleaned = cleaned.replace(/\$/g, " dollars ") // Dollar signs
-  cleaned = cleaned.replace(/[¢]/g, " cents ") // Cents
-  cleaned = cleaned.replace(/[£]/g, " pounds ") // British pounds
-  cleaned = cleaned.replace(/[€]/g, " euros ") // Euros
+  // Fix other common real estate abbreviations
+  fixed = fixed
+    .replace(/\bHOA\b/gi, "homeowners association")
+    .replace(/\bA\/C\b/gi, "air conditioning")
+    .replace(/\bHVAC\b/gi, "heating and air conditioning")
+    .replace(/\bW\/D\b/gi, "washer and dryer")
+    .replace(/\bSS\b/gi, "stainless steel")
+    .replace(/\bGR\b/gi, "great room")
+    .replace(/\bMBR\b/gi, "master bedroom")
+    .replace(/\bFP\b/gi, "fireplace")
+    .replace(/\bLG\b/gi, "large")
+    .replace(/\bSM\b/gi, "small")
+    .replace(/\bMED\b/gi, "medium")
+    .replace(/\bXL\b/gi, "extra large")
+    .replace(/\bLRG\b/gi, "large")
+    .replace(/\bAPPROX\b/gi, "approximately")
+    .replace(/\bAPPX\b/gi, "approximately")
+    .replace(/\bW\/\b/gi, "with ")
+    .replace(/\bWO\b/gi, "without")
+    .replace(/\bUPD\b/gi, "updated")
+    .replace(/\bREN\b/gi, "renovated")
+    .replace(/\bNEW\b/gi, "new")
+    .replace(/\bORIG\b/gi, "original")
+    .replace(/\bHW\b/gi, "hardwood")
+    .replace(/\bTILE\b/gi, "tile")
+    .replace(/\bCPT\b/gi, "carpet")
+    .replace(/\bKIT\b/gi, "kitchen")
+    .replace(/\bLR\b/gi, "living room")
+    .replace(/\bDR\b/gi, "dining room")
+    .replace(/\bFR\b/gi, "family room")
+    .replace(/\bBSMT\b/gi, "basement")
+    .replace(/\bGAR\b/gi, "garage")
+    .replace(/\bDECK\b/gi, "deck")
+    .replace(/\bPATIO\b/gi, "patio")
+    .replace(/\bYRD\b/gi, "yard")
+    .replace(/\bFENC\b/gi, "fenced")
+    .replace(/\bLNDSCP\b/gi, "landscaped")
+    .replace(/\bPVT\b/gi, "private")
+    .replace(/\bQUIET\b/gi, "quiet")
+    .replace(/\bCUL\b/gi, "cul-de-sac")
+    .replace(/\bSTR\b/gi, "street")
+    .replace(/\bAVE\b/gi, "avenue")
+    .replace(/\bBLVD\b/gi, "boulevard")
+    .replace(/\bRD\b/gi, "road")
+    .replace(/\bDR\b/gi, "drive")
+    .replace(/\bCT\b/gi, "court")
+    .replace(/\bLN\b/gi, "lane")
+    .replace(/\bPL\b/gi, "place")
+    .replace(/\bCIR\b/gi, "circle")
 
-  // Step 6: Remove bullet points and special formatting
-  cleaned = cleaned.replace(/[•·]/g, "and") // Bullet points
-  cleaned = cleaned.replace(/[▪▫]/g, "") // Square bullets
-  cleaned = cleaned.replace(/[►▶]/g, "") // Arrow bullets
-  cleaned = cleaned.replace(/[★☆]/g, "") // Stars
+  // Fix contractions to be more formal
+  fixed = fixed
+    .replace(/don't/gi, "do not")
+    .replace(/won't/gi, "will not")
+    .replace(/can't/gi, "cannot")
+    .replace(/isn't/gi, "is not")
+    .replace(/aren't/gi, "are not")
+    .replace(/wasn't/gi, "was not")
+    .replace(/weren't/gi, "were not")
+    .replace(/hasn't/gi, "has not")
+    .replace(/haven't/gi, "have not")
+    .replace(/hadn't/gi, "had not")
+    .replace(/doesn't/gi, "does not")
+    .replace(/didn't/gi, "did not")
+    .replace(/shouldn't/gi, "should not")
+    .replace(/wouldn't/gi, "would not")
+    .replace(/couldn't/gi, "could not")
+    .replace(/you're/gi, "you are")
+    .replace(/we're/gi, "we are")
+    .replace(/they're/gi, "they are")
+    .replace(/it's/gi, "it is")
+    .replace(/that's/gi, "that is")
+    .replace(/here's/gi, "here is")
+    .replace(/there's/gi, "there is")
+    .replace(/what's/gi, "what is")
+    .replace(/let's/gi, "let us")
+    .replace(/I'm/gi, "I am")
+    .replace(/you'll/gi, "you will")
+    .replace(/we'll/gi, "we will")
+    .replace(/they'll/gi, "they will")
 
-  // Step 7: Remove hashtags and @ mentions
-  cleaned = cleaned.replace(/#\w+/g, "") // Hashtags
-  cleaned = cleaned.replace(/@\w+/g, "") // @ mentions
+  // Convert numbers under 10 to words (but preserve larger numbers)
+  fixed = fixed
+    .replace(/\b1\s+(?=bedrooms?|bathrooms?)/gi, "one ")
+    .replace(/\b2\s+(?=bedrooms?|bathrooms?)/gi, "two ")
+    .replace(/\b3\s+(?=bedrooms?|bathrooms?)/gi, "three ")
+    .replace(/\b4\s+(?=bedrooms?|bathrooms?)/gi, "four ")
+    .replace(/\b5\s+(?=bedrooms?|bathrooms?)/gi, "five ")
+    .replace(/\b6\s+(?=bedrooms?|bathrooms?)/gi, "six ")
+    .replace(/\b7\s+(?=bedrooms?|bathrooms?)/gi, "seven ")
+    .replace(/\b8\s+(?=bedrooms?|bathrooms?)/gi, "eight ")
+    .replace(/\b9\s+(?=bedrooms?|bathrooms?)/gi, "nine ")
 
-  // Step 8: Remove remaining non-ASCII characters (keep basic accented letters)
-  cleaned = cleaned.replace(/[^\x20-\x7E\u00C0-\u00FF]/g, " ")
+  // Fix decimal bathrooms
+  fixed = fixed
+    .replace(/2\.5\s+bathrooms/gi, "two and a half bathrooms")
+    .replace(/1\.5\s+bathrooms/gi, "one and a half bathrooms")
+    .replace(/3\.5\s+bathrooms/gi, "three and a half bathrooms")
+    .replace(/4\.5\s+bathrooms/gi, "four and a half bathrooms")
 
-  // Step 9: Clean up spacing and punctuation
-  cleaned = cleaned.replace(/\s+/g, " ") // Normalize whitespace
-  cleaned = cleaned.replace(/\s+([.,!?])/g, "$1") // Fix spacing before punctuation
-  cleaned = cleaned.replace(/([.,!?])\s*([.,!?])/g, "$1 $2") // Fix multiple punctuation
-  cleaned = cleaned.replace(/\.([A-Za-z])/g, ". $1") // Space after periods
-  cleaned = cleaned.replace(/!([A-Za-z])/g, "! $1") // Space after exclamations
-  cleaned = cleaned.replace(/\?([A-Za-z])/g, "? $1") // Space after questions
+  // Fix grammar issues
+  fixed = fixed
+    .replace(/\s+/g, " ") // Normalize whitespace
+    .replace(/\s*([.!?])\s*/g, "$1 ") // Fix punctuation spacing
+    .replace(/([.!?])\s*([a-z])/g, "$1 $2") // Ensure space after sentence endings
+    .replace(/([.!?])([A-Z])/g, "$1 $2") // Space between sentences
 
-  // Step 10: Final cleanup
-  cleaned = cleaned.trim()
+  // Capitalize first letter of sentences
+  fixed = fixed.replace(/(^|[.!?]\s+)([a-z])/g, (match, p1, p2) => p1 + p2.toUpperCase())
 
-  console.log("✅ Script sanitization complete")
-  console.log("📝 Cleaned length:", cleaned.length)
-  console.log("🔍 Sample cleaned text:", cleaned.substring(0, 100) + "...")
+  // Final cleanup
+  fixed = fixed.trim()
 
-  return cleaned
+  console.log("✅ AGGRESSIVE fixes complete")
+  console.log("📝 After fixes:", fixed.substring(0, 150))
+
+  return fixed
 }
 
 // Fallback script templates with perfect grammar and no abbreviations
@@ -124,6 +207,19 @@ const generateFallbackScript = (data: PropertyData): string => {
     maximumFractionDigits: 0,
   }).format(price)
 
+  // Convert numbers to words for bedrooms/bathrooms
+  const bedroomText = bedrooms === 1 ? "one bedroom" : `${bedrooms} bedrooms`
+  const bathroomText =
+    bathrooms === 1
+      ? "one bathroom"
+      : bathrooms === 1.5
+        ? "one and a half bathrooms"
+        : bathrooms === 2.5
+          ? "two and a half bathrooms"
+          : bathrooms === 3.5
+            ? "three and a half bathrooms"
+            : `${bathrooms} bathrooms`
+
   const hooks = [
     "Stop scrolling! This property is about to blow your mind!",
     "You need to see this house! This is why I love real estate!",
@@ -133,9 +229,9 @@ const generateFallbackScript = (data: PropertyData): string => {
   ]
 
   const midSections = [
-    `We have ${bedrooms} spacious bedrooms and ${bathrooms} beautiful bathrooms spread across ${sqft.toLocaleString()} square feet of pure luxury!`,
-    `${bedrooms} bedrooms, ${bathrooms} bathrooms, and ${sqft.toLocaleString()} square feet of absolute perfection!`,
-    `This ${bedrooms}-bedroom, ${bathrooms}-bathroom masterpiece offers ${sqft.toLocaleString()} square feet of dream living!`,
+    `We have ${bedroomText} and ${bathroomText} spread across ${sqft.toLocaleString()} square feet of pure luxury!`,
+    `${bedroomText}, ${bathroomText}, and ${sqft.toLocaleString()} square feet of absolute perfection!`,
+    `This ${bedroomText}, ${bathroomText} masterpiece offers ${sqft.toLocaleString()} square feet of dream living!`,
   ]
 
   const endings = [
@@ -166,13 +262,26 @@ const generateFallbackScript = (data: PropertyData): string => {
 
   script += `${ending}`
 
-  // Apply grammar fixes to fallback script too
-  return sanitizeAndFixGrammar(script)
+  // Apply aggressive fixes to fallback script too
+  return aggressivelyFixAbbreviations(sanitizeScript(script))
 }
 
-// OpenAI API function with improved prompt for perfect grammar and no abbreviations
+// OpenAI API function with MUCH stronger prompt
 async function generateOpenAIScript(propertyData: PropertyData): Promise<string> {
   const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount = 1 } = propertyData
+
+  // Convert numbers to words for the prompt
+  const bedroomText = bedrooms === 1 ? "one bedroom" : `${bedrooms} bedrooms`
+  const bathroomText =
+    bathrooms === 1
+      ? "one bathroom"
+      : bathrooms === 1.5
+        ? "one and a half bathrooms"
+        : bathrooms === 2.5
+          ? "two and a half bathrooms"
+          : bathrooms === 3.5
+            ? "three and a half bathrooms"
+            : `${bathrooms} bathrooms`
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -185,69 +294,50 @@ async function generateOpenAIScript(propertyData: PropertyData): Promise<string>
       messages: [
         {
           role: "system",
-          content: `You are a professional real estate marketing expert who creates viral TikTok scripts with PERFECT grammar and NO abbreviations.
+          content: `You are a professional real estate marketing expert. Create TikTok scripts with PERFECT grammar and ZERO abbreviations.
 
-CRITICAL WRITING RULES - FOLLOW EXACTLY:
-- Use PERFECT grammar, spelling, and punctuation
-- NEVER use abbreviations (write "bedrooms" not "BR", "bathrooms" not "BA", "square feet" not "sqft")
-- Write out ALL numbers as words when under 10 (write "three" not "3")
-- Use complete sentences with proper structure
-- No emojis, special characters, or symbols
-- Use "dollars" instead of "$" symbol
-- Write "and" instead of "&" symbol
-- Use proper capitalization and sentence structure
-- Every sentence must be grammatically perfect
+CRITICAL RULES - NEVER BREAK THESE:
+1. NEVER use BR, BA, SQFT, SF, SQ FT, or any abbreviations
+2. ALWAYS write "bedrooms" and "bathrooms" in full
+3. ALWAYS write "square feet" never "sqft" or "sq ft"
+4. NEVER use contractions (don't → do not, you're → you are)
+5. Write numbers under 10 as words (3 → three, 4 → four)
+6. Use perfect grammar and complete sentences
+7. No emojis, symbols, or special characters
 
-SCRIPT REQUIREMENTS:
-- Hook viewers in first 3 seconds with compelling opening
-- Use urgency and scarcity language naturally
-- Highlight key selling points and lifestyle benefits
-- Include emotional triggers and investment potential
-- Reference property features for ${imageCount} images
-- Incorporate custom property descriptions naturally
-- End with strong call-to-action
-- 45-60 seconds when spoken (150-200 words)
-- Energetic but professional TikTok language
-- Create anticipation for room reveals
+EXAMPLES OF WHAT TO WRITE:
+✅ "This four bedroom, two and a half bathroom home"
+✅ "two thousand five hundred square feet"
+✅ "You will not believe this opportunity"
 
-GRAMMAR EXAMPLES:
-- Write "This three-bedroom, two-bathroom home" not "This 3BR/2BA home"
-- Write "two thousand five hundred square feet" not "2500 sqft"
-- Write "five hundred thousand dollars" not "$500K"
-- Write "Do not miss this opportunity" not "Don't miss this"
+EXAMPLES OF WHAT NEVER TO WRITE:
+❌ "This 4BR, 2.5BA home"
+❌ "2500 sqft" or "2500 sq ft"
+❌ "You won't believe this"
 
-Create a script with PERFECT grammar and NO abbreviations whatsoever.`,
+Create an engaging TikTok script following these rules exactly.`,
         },
         {
           role: "user",
-          content: `Create a viral TikTok voiceover script with PERFECT grammar and NO abbreviations for this property with ${imageCount} images.
+          content: `Create a TikTok script with ZERO abbreviations for this property:
 
 Address: ${address}
-Price: $${price.toLocaleString()}
-Bedrooms: ${bedrooms}
-Bathrooms: ${bathrooms}
-Square Feet: ${sqft.toLocaleString()}
-Images Available: ${imageCount} photos
+Bedrooms: ${bedroomText}
+Bathrooms: ${bathroomText}
+Square Feet: ${sqft.toLocaleString()} square feet
+Price: ${price.toLocaleString()} dollars
+Images: ${imageCount} photos
 
-${
-  propertyDescription && propertyDescription.trim()
-    ? `IMPORTANT - Custom Property Features to Highlight:
-${propertyDescription.trim()}
+${propertyDescription && propertyDescription.trim() ? `Special Features: ${propertyDescription.trim()}` : ""}
 
-Please incorporate these specific features naturally into the script with perfect grammar.`
-    : ""
-}
+REMEMBER:
+- Write "${bedroomText}" not "${bedrooms}BR"
+- Write "${bathroomText}" not "${bathrooms}BA"
+- Write "${sqft.toLocaleString()} square feet" not "${sqft} sqft"
+- Use complete words and perfect grammar
+- No abbreviations whatsoever
 
-Requirements:
-- Use PERFECT grammar and complete sentences
-- Write "bedrooms" and "bathrooms" in full (never BR/BA)
-- Write numbers under 10 as words
-- Write "dollars" instead of using $ symbol
-- No abbreviations or shortened forms
-- Professional but energetic tone
-- Strong hook and call-to-action
-
-Make it compelling for buyers and investors with perfect grammar throughout.`,
+Create an engaging 45-60 second script with perfect grammar and zero abbreviations.`,
         },
       ],
       max_tokens: 600,
@@ -263,91 +353,20 @@ Make it compelling for buyers and investors with perfect grammar throughout.`,
   const data = await response.json()
   const rawScript = data.choices[0].message.content.trim()
 
-  // Apply comprehensive sanitization and grammar fixes
-  const sanitizedScript = sanitizeAndFixGrammar(rawScript)
+  // Apply AGGRESSIVE abbreviation fixing
+  const fixedScript = aggressivelyFixAbbreviations(sanitizeScript(rawScript))
 
-  console.log("🧹 Script sanitized and grammar-checked")
-  return sanitizedScript
-}
+  console.log("🧹 Script aggressively fixed for abbreviations")
+  console.log("📝 Final script sample:", fixedScript.substring(0, 150))
 
-// Enhanced sanitization with grammar fixes
-function sanitizeAndFixGrammar(text: string): string {
-  console.log("🧹 Applying grammar fixes and sanitization...")
-
-  let cleaned = sanitizeScript(text)
-
-  // Fix common abbreviations that might slip through
-  cleaned = cleaned
-    .replace(/\bBR\b/g, "bedrooms")
-    .replace(/\bBA\b/g, "bathrooms")
-    .replace(/\bsqft\b/gi, "square feet")
-    .replace(/\bsq ft\b/gi, "square feet")
-    .replace(/\bsq\. ft\./gi, "square feet")
-    .replace(/\bK\b/g, "thousand")
-    .replace(/\$(\d+)K/g, "$1 thousand dollars")
-    .replace(/\$(\d+)M/g, "$1 million dollars")
-
-  // Fix contractions for more formal speech
-  cleaned = cleaned
-    .replace(/don't/gi, "do not")
-    .replace(/won't/gi, "will not")
-    .replace(/can't/gi, "cannot")
-    .replace(/isn't/gi, "is not")
-    .replace(/aren't/gi, "are not")
-    .replace(/wasn't/gi, "was not")
-    .replace(/weren't/gi, "were not")
-    .replace(/hasn't/gi, "has not")
-    .replace(/haven't/gi, "have not")
-    .replace(/hadn't/gi, "had not")
-    .replace(/doesn't/gi, "does not")
-    .replace(/didn't/gi, "did not")
-    .replace(/shouldn't/gi, "should not")
-    .replace(/wouldn't/gi, "would not")
-    .replace(/couldn't/gi, "could not")
-    .replace(/you're/gi, "you are")
-    .replace(/we're/gi, "we are")
-    .replace(/they're/gi, "they are")
-    .replace(/it's/gi, "it is")
-    .replace(/that's/gi, "that is")
-    .replace(/here's/gi, "here is")
-    .replace(/there's/gi, "there is")
-    .replace(/what's/gi, "what is")
-    .replace(/let's/gi, "let us")
-
-  // Fix number formatting (write out numbers under 10)
-  cleaned = cleaned
-    .replace(/\b1\b/g, "one")
-    .replace(/\b2\b/g, "two")
-    .replace(/\b3\b/g, "three")
-    .replace(/\b4\b/g, "four")
-    .replace(/\b5\b/g, "five")
-    .replace(/\b6\b/g, "six")
-    .replace(/\b7\b/g, "seven")
-    .replace(/\b8\b/g, "eight")
-    .replace(/\b9\b/g, "nine")
-
-  // Ensure proper sentence structure
-  cleaned = cleaned
-    .replace(/\s+/g, " ") // Normalize whitespace
-    .replace(/\s*([.!?])\s*/g, "$1 ") // Fix punctuation spacing
-    .replace(/([.!?])\s*([a-z])/g, "$1 $2") // Ensure space after sentence endings
-    .replace(/([.!?])([A-Z])/g, "$1 $2") // Space between sentences
-
-  // Capitalize first letter of sentences
-  cleaned = cleaned.replace(/(^|[.!?]\s+)([a-z])/g, (match, p1, p2) => p1 + p2.toUpperCase())
-
-  // Final cleanup
-  cleaned = cleaned.trim()
-
-  console.log("✅ Grammar fixes and sanitization complete")
-  return cleaned
+  return fixedScript
 }
 
 export async function POST(request: NextRequest) {
   try {
     const propertyData: PropertyData = await request.json()
 
-    console.log("Generating emoji-free script for:", propertyData.address)
+    console.log("Generating NO-ABBREVIATION script for:", propertyData.address)
     if (propertyData.propertyDescription) {
       console.log("Including custom property description:", propertyData.propertyDescription.substring(0, 100) + "...")
     }
@@ -355,16 +374,16 @@ export async function POST(request: NextRequest) {
     // First try OpenAI API if key is available
     if (process.env.OPENAI_API_KEY) {
       try {
-        console.log("Using OpenAI API for emoji-free script generation...")
+        console.log("Using OpenAI API for NO-ABBREVIATION script generation...")
         const script = await generateOpenAIScript(propertyData)
 
-        console.log("OpenAI emoji-free script generated successfully")
+        console.log("OpenAI NO-ABBREVIATION script generated successfully")
         console.log("Sample output:", script.substring(0, 100) + "...")
 
         return NextResponse.json({
           success: true,
           script: script,
-          method: "OpenAI (emoji-free)",
+          method: "OpenAI (no-abbreviations)",
         })
       } catch (aiError) {
         console.log("OpenAI API failed, using fallback:", aiError)
@@ -373,29 +392,31 @@ export async function POST(request: NextRequest) {
       console.log("No OpenAI API key found, using fallback")
     }
 
-    // Use fallback script generation (already emoji-free)
+    // Use fallback script generation
     const fallbackScript = generateFallbackScript(propertyData)
 
-    console.log("Fallback emoji-free script generated successfully")
+    console.log("Fallback NO-ABBREVIATION script generated successfully")
     console.log("Sample output:", fallbackScript.substring(0, 100) + "...")
 
     return NextResponse.json({
       success: true,
       script: fallbackScript,
-      method: "fallback (emoji-free)",
+      method: "fallback (no-abbreviations)",
     })
   } catch (error) {
     console.error("Script generation error:", error)
 
-    // Last resort - basic template (emoji-free)
-    const basicScript = sanitizeScript(
-      `Welcome to this amazing property! This stunning home features multiple bedrooms and bathrooms with incredible living space. Don't miss this opportunity! Contact me today!`,
+    // Last resort - basic template
+    const basicScript = aggressivelyFixAbbreviations(
+      sanitizeScript(
+        `Welcome to this amazing property! This stunning home features multiple bedrooms and bathrooms with incredible living space. Do not miss this opportunity! Contact me today!`,
+      ),
     )
 
     return NextResponse.json({
       success: true,
       script: basicScript,
-      method: "basic (emoji-free)",
+      method: "basic (no-abbreviations)",
     })
   }
 }
