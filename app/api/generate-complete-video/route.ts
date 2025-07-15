@@ -76,8 +76,9 @@ function calculateVideoDurationFromPhotos(photoCount: number): {
   introTime: number
   outroTime: number
   photoDisplayTime: number
+  actualPhotoCount: number
 } {
-  console.log(`📸 Calculating video duration for ${photoCount} photos (max 30 supported)`)
+  console.log(`📸 Calculating video duration for ${photoCount} photos`)
 
   // Base timing rules
   const baseTimePerPhoto = 1.5 // 1.5 seconds per photo
@@ -86,7 +87,7 @@ function calculateVideoDurationFromPhotos(photoCount: number): {
   const maxTotalDuration = 60 // Cap at 60 seconds for 30 photos
   const maxPhotos = 30 // Maximum photos supported
 
-  // Ensure we don't exceed maximum photo count
+  // Use all photos up to the maximum
   const actualPhotoCount = Math.min(photoCount, maxPhotos)
 
   if (photoCount > maxPhotos) {
@@ -118,6 +119,7 @@ function calculateVideoDurationFromPhotos(photoCount: number): {
     introTime,
     outroTime,
     photoDisplayTime,
+    actualPhotoCount,
   }
 }
 
@@ -496,13 +498,18 @@ export async function POST(request: NextRequest) {
 
     const data: VideoRequest = await request.json()
 
-    // Validation
+    // Validation - ENSURE WE SUPPORT UP TO 30 PHOTOS
     if (!data.address || !data.price || !data.script || !data.imageUrls || data.imageUrls.length === 0) {
       return NextResponse.json({ error: "Missing required data" }, { status: 400 })
     }
 
+    if (data.imageUrls.length > 30) {
+      console.log(`⚠️ Received ${data.imageUrls.length} photos, limiting to 30 for performance`)
+      data.imageUrls = data.imageUrls.slice(0, 30)
+    }
+
     console.log(`📍 Property: ${data.address}`)
-    console.log(`🖼️ Images: ${data.imageUrls.length} (processing all images up to 30 max)`)
+    console.log(`🖼️ Images: ${data.imageUrls.length} (processing ALL images up to 30 max)`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
     // Step 1: Calculate video duration based on photo count (supports up to 30 photos)
@@ -530,7 +537,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `📊 Video: ${videoDuration.totalDuration.toFixed(1)}s duration based on ${data.imageUrls.length} photos`,
+      `📊 Video: ${videoDuration.totalDuration.toFixed(1)}s duration based on ${videoDuration.actualPhotoCount} photos`,
     )
     console.log(`📸 Photo timing: ${videoDuration.timePerPhoto.toFixed(2)}s per photo`)
     console.log(
@@ -542,7 +549,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       audioUrl: audioResult.audioUrl,
-      images: data.imageUrls, // Return ALL images, no filtering
+      images: data.imageUrls, // Return ALL processed images
       duration: videoDuration.totalDuration,
       timePerImage: videoDuration.timePerPhoto,
       wordTimings: audioResult.wordTimings,
@@ -572,7 +579,7 @@ export async function POST(request: NextRequest) {
         photos: videoDuration.photoDisplayTime,
         outro: videoDuration.outroTime,
         perPhoto: videoDuration.timePerPhoto,
-        photoCount: data.imageUrls.length, // Actual photo count
+        photoCount: videoDuration.actualPhotoCount,
         maxPhotosSupported: 30,
       },
       metadata: {
@@ -584,7 +591,8 @@ export async function POST(request: NextRequest) {
         sanitizedScriptLength: audioResult.sanitizedScript?.length || 0,
         voiceVariation: audioResult.voiceVariation || "standard",
         durationMethod: "photo-based",
-        photosProcessed: Math.min(data.imageUrls.length, 30),
+        photosProcessed: videoDuration.actualPhotoCount,
+        photosReceived: data.imageUrls.length,
       },
     })
   } catch (error) {

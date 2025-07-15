@@ -89,7 +89,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const displayPlan: ImageDisplayPlan[] = []
       const photoDisplayTime = totalDuration - introTime - outroTime
 
-      // Use all photos up to the maximum
+      // Use all photos up to the maximum - NO ARTIFICIAL LIMITS
       const photosToUse = Math.min(imageCount, maxPhotos)
       const actualImageUrls = imageUrls.slice(0, photosToUse)
       const timePerPhoto = photoDisplayTime / photosToUse
@@ -425,7 +425,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       // Create PHOTO-BASED image display plan - SUPPORTS ALL PHOTOS UP TO 30
       const imageDisplayPlan = createPhotoBasedImageDisplayPlan(
-        propertyData.imageUrls, // Pass ALL images
+        propertyData.imageUrls, // Pass ALL images - no filtering
         audioData.duration,
         audioData.videoDuration.intro,
         audioData.videoDuration.outro,
@@ -452,32 +452,39 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const highlightCaptions = extractHighlightCaptions(propertyData.script, audioData.duration)
       setProgress(40)
 
-      // PARALLEL IMAGE LOADING for ALL PHOTOS - NO ARTIFICIAL LIMITS
+      // PARALLEL IMAGE LOADING for ALL PHOTOS - ROBUST ERROR HANDLING
       const loadedImages: { [key: string]: HTMLImageElement } = {}
       const uniqueImageUrls = [...new Set(imageDisplayPlan.map((plan) => plan.imageUrl))]
 
       console.log(`📸 Loading ${uniqueImageUrls.length} unique images in parallel...`)
 
+      // Use Promise.allSettled to handle failed image loads gracefully
       const imagePromises = uniqueImageUrls.map(async (url, index) => {
         try {
           const img = await loadImage(url)
           loadedImages[url] = img
           setProgress(40 + ((index + 1) / uniqueImageUrls.length) * 20)
           console.log(`✅ Loaded image ${index + 1}/${uniqueImageUrls.length}`)
-          return img
+          return { status: "fulfilled", value: img, url }
         } catch (error) {
-          console.warn(`⚠️ Failed to load image ${index + 1}:`, error)
-          return null
+          console.warn(`⚠️ Failed to load image ${index + 1} (${url}):`, error)
+          return { status: "rejected", reason: error, url }
         }
       })
 
-      await Promise.all(imagePromises)
+      const imageResults = await Promise.allSettled(imagePromises)
+      const successfulLoads = imageResults.filter((result) => result.status === "fulfilled").length
+      const failedLoads = imageResults.filter((result) => result.status === "rejected").length
 
-      if (Object.keys(loadedImages).length === 0) {
+      if (successfulLoads === 0) {
         throw new Error("No images could be loaded")
       }
 
-      console.log(`✅ Successfully loaded ${Object.keys(loadedImages).length} images`)
+      console.log(`✅ Successfully loaded ${successfulLoads} images`)
+      if (failedLoads > 0) {
+        console.log(`⚠️ Failed to load ${failedLoads} images - continuing with available images`)
+      }
+
       setProgress(60)
 
       // OPTIMIZED STREAM SETUP
@@ -671,6 +678,19 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
               40,
               125,
             )
+          } else {
+            // FALLBACK: Show black screen with property info if image fails
+            ctx.fillStyle = "#000000"
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "bold 48px Arial"
+            ctx.textAlign = "center"
+            ctx.fillText("Loading Image...", canvas.width / 2, canvas.height / 2)
+
+            if (currentHighlight) {
+              drawHighlightCaption(ctx, currentHighlight, canvas, elapsedSeconds)
+            }
           }
         }
 
