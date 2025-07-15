@@ -77,21 +77,28 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     })
   }, [])
 
-  // PHOTO-BASED IMAGE DISPLAY PLANNING WITH SMOOTH TRANSITIONS
+  // PHOTO-BASED IMAGE DISPLAY PLANNING - SUPPORTS ALL PHOTOS UP TO 30
   const createPhotoBasedImageDisplayPlan = useCallback(
     (imageUrls: string[], totalDuration: number, introTime: number, outroTime: number): ImageDisplayPlan[] => {
       const imageCount = imageUrls.length
-      console.log(`📸 Creating photo-based display plan for ${imageCount} images`)
+      const maxPhotos = 30 // Maximum photos we can handle
+
+      console.log(`📸 Creating photo-based display plan for ${imageCount} images (max ${maxPhotos} supported)`)
       console.log(`📊 Total: ${totalDuration}s, Intro: ${introTime}s, Outro: ${outroTime}s`)
 
       const displayPlan: ImageDisplayPlan[] = []
       const photoDisplayTime = totalDuration - introTime - outroTime
-      const timePerPhoto = photoDisplayTime / imageCount
 
+      // Use all photos up to the maximum
+      const photosToUse = Math.min(imageCount, maxPhotos)
+      const actualImageUrls = imageUrls.slice(0, photosToUse)
+      const timePerPhoto = photoDisplayTime / photosToUse
+
+      console.log(`📸 Using ${photosToUse} photos out of ${imageCount} total`)
       console.log(`📸 Photo display time: ${photoDisplayTime}s (${timePerPhoto.toFixed(2)}s per photo)`)
 
-      // Create evenly spaced photo timeline
-      imageUrls.forEach((url, index) => {
+      // Create evenly spaced photo timeline for ALL photos
+      actualImageUrls.forEach((url, index) => {
         const startTime = introTime + index * timePerPhoto
         const endTime = introTime + (index + 1) * timePerPhoto
 
@@ -105,11 +112,16 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         })
 
         console.log(
-          `📸 Photo ${index + 1}: ${startTime.toFixed(2)}s - ${endTime.toFixed(2)}s (${timePerPhoto.toFixed(2)}s)`,
+          `📸 Photo ${index + 1}/${photosToUse}: ${startTime.toFixed(2)}s - ${endTime.toFixed(2)}s (${timePerPhoto.toFixed(2)}s)`,
         )
       })
 
       console.log(`✅ Photo-based plan complete: ${displayPlan.length} photos evenly spaced`)
+
+      if (imageCount > maxPhotos) {
+        console.log(`⚠️ Note: ${imageCount - maxPhotos} photos were not used due to ${maxPhotos} photo limit`)
+      }
+
       return displayPlan
     },
     [],
@@ -398,6 +410,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.height = 1920
 
       console.log("🎬 Starting PHOTO-BASED video generation - 1080x1920 MP4")
+      console.log(`📸 Processing ${propertyData.imageUrls.length} photos (up to 30 max)`)
 
       const audioData = await generateAudio(propertyData.script)
       setProgress(20)
@@ -410,9 +423,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       console.log(`📸 Video based on ${propertyData.imageUrls.length} photos`)
       console.log(`📊 Duration breakdown:`, audioData.videoDuration)
 
-      // Create PHOTO-BASED image display plan
+      // Create PHOTO-BASED image display plan - SUPPORTS ALL PHOTOS UP TO 30
       const imageDisplayPlan = createPhotoBasedImageDisplayPlan(
-        propertyData.imageUrls,
+        propertyData.imageUrls, // Pass ALL images
         audioData.duration,
         audioData.videoDuration.intro,
         audioData.videoDuration.outro,
@@ -439,15 +452,18 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const highlightCaptions = extractHighlightCaptions(propertyData.script, audioData.duration)
       setProgress(40)
 
-      // PARALLEL IMAGE LOADING for faster processing
+      // PARALLEL IMAGE LOADING for ALL PHOTOS - NO ARTIFICIAL LIMITS
       const loadedImages: { [key: string]: HTMLImageElement } = {}
       const uniqueImageUrls = [...new Set(imageDisplayPlan.map((plan) => plan.imageUrl))]
+
+      console.log(`📸 Loading ${uniqueImageUrls.length} unique images in parallel...`)
 
       const imagePromises = uniqueImageUrls.map(async (url, index) => {
         try {
           const img = await loadImage(url)
           loadedImages[url] = img
           setProgress(40 + ((index + 1) / uniqueImageUrls.length) * 20)
+          console.log(`✅ Loaded image ${index + 1}/${uniqueImageUrls.length}`)
           return img
         } catch (error) {
           console.warn(`⚠️ Failed to load image ${index + 1}:`, error)
@@ -461,7 +477,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         throw new Error("No images could be loaded")
       }
 
-      console.log(`✅ FAST loaded ${Object.keys(loadedImages).length} images`)
+      console.log(`✅ Successfully loaded ${Object.keys(loadedImages).length} images`)
       setProgress(60)
 
       // OPTIMIZED STREAM SETUP
@@ -543,6 +559,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           })
 
           console.log(`✅ PHOTO-BASED video created: ${videoBlob.size} bytes (${mediaRecorder.mimeType})`)
+          console.log(`📸 Video includes ${imageDisplayPlan.length} photos with smooth transitions`)
 
           const videoUrl = URL.createObjectURL(videoBlob)
           setProgress(100)
@@ -560,7 +577,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       setProgress(75)
-      console.log("🎬 Starting PHOTO-BASED recording...")
+      console.log("🎬 Starting PHOTO-BASED recording with ALL photos...")
 
       mediaRecorder.start(100)
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -584,7 +601,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           return
         }
 
-        // FIND CURRENT IMAGE BASED ON PHOTO-BASED TIMING
+        // FIND CURRENT IMAGE BASED ON PHOTO-BASED TIMING - NO LIMITS
         const currentImagePlan = imageDisplayPlan.find(
           (plan) => elapsedSeconds >= plan.startTime && elapsedSeconds < plan.endTime,
         )

@@ -69,7 +69,7 @@ function validateUTF8(text: string): boolean {
   }
 }
 
-// PHOTO-BASED VIDEO DURATION CALCULATION
+// PHOTO-BASED VIDEO DURATION CALCULATION - SUPPORTS UP TO 30 PHOTOS
 function calculateVideoDurationFromPhotos(photoCount: number): {
   totalDuration: number
   timePerPhoto: number
@@ -77,16 +77,24 @@ function calculateVideoDurationFromPhotos(photoCount: number): {
   outroTime: number
   photoDisplayTime: number
 } {
-  console.log(`📸 Calculating video duration for ${photoCount} photos`)
+  console.log(`📸 Calculating video duration for ${photoCount} photos (max 30 supported)`)
 
   // Base timing rules
   const baseTimePerPhoto = 1.5 // 1.5 seconds per photo
   const introTime = 1.5 // 1.5 seconds intro
   const outroTime = 1.5 // 1.5 seconds outro
   const maxTotalDuration = 60 // Cap at 60 seconds for 30 photos
+  const maxPhotos = 30 // Maximum photos supported
+
+  // Ensure we don't exceed maximum photo count
+  const actualPhotoCount = Math.min(photoCount, maxPhotos)
+
+  if (photoCount > maxPhotos) {
+    console.log(`⚠️ Photo count ${photoCount} exceeds maximum ${maxPhotos}, using first ${maxPhotos} photos`)
+  }
 
   // Calculate photo display time
-  let photoDisplayTime = photoCount * baseTimePerPhoto
+  let photoDisplayTime = actualPhotoCount * baseTimePerPhoto
   let totalDuration = photoDisplayTime + introTime + outroTime
 
   // Apply 60-second cap for max photos
@@ -96,9 +104,9 @@ function calculateVideoDurationFromPhotos(photoCount: number): {
     photoDisplayTime = totalDuration - introTime - outroTime
   }
 
-  const timePerPhoto = photoDisplayTime / photoCount
+  const timePerPhoto = photoDisplayTime / actualPhotoCount
 
-  console.log(`📊 Video timing calculated:`)
+  console.log(`📊 Video timing calculated for ${actualPhotoCount} photos:`)
   console.log(`   • Total duration: ${totalDuration}s`)
   console.log(`   • Intro: ${introTime}s`)
   console.log(`   • Photos: ${photoDisplayTime}s (${timePerPhoto.toFixed(2)}s each)`)
@@ -494,10 +502,10 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`📍 Property: ${data.address}`)
-    console.log(`🖼️ Images: ${data.imageUrls.length}`)
+    console.log(`🖼️ Images: ${data.imageUrls.length} (processing all images up to 30 max)`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
-    // Step 1: Calculate video duration based on photo count
+    // Step 1: Calculate video duration based on photo count (supports up to 30 photos)
     const videoDuration = calculateVideoDurationFromPhotos(data.imageUrls.length)
 
     // Step 2: Generate Rachel voice with DYNAMIC VOICE VARIATION and DURATION MATCHING
@@ -534,7 +542,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       audioUrl: audioResult.audioUrl,
-      images: data.imageUrls,
+      images: data.imageUrls, // Return ALL images, no filtering
       duration: videoDuration.totalDuration,
       timePerImage: videoDuration.timePerPhoto,
       wordTimings: audioResult.wordTimings,
@@ -564,7 +572,8 @@ export async function POST(request: NextRequest) {
         photos: videoDuration.photoDisplayTime,
         outro: videoDuration.outroTime,
         perPhoto: videoDuration.timePerPhoto,
-        photoCount: data.imageUrls.length,
+        photoCount: data.imageUrls.length, // Actual photo count
+        maxPhotosSupported: 30,
       },
       metadata: {
         alignmentUsed: audioResult.alignmentUsed || false,
@@ -575,6 +584,7 @@ export async function POST(request: NextRequest) {
         sanitizedScriptLength: audioResult.sanitizedScript?.length || 0,
         voiceVariation: audioResult.voiceVariation || "standard",
         durationMethod: "photo-based",
+        photosProcessed: Math.min(data.imageUrls.length, 30),
       },
     })
   } catch (error) {
