@@ -27,48 +27,6 @@ function sanitizeScript(text: string): string {
     .trim()
 }
 
-// Comprehensive script sanitization for ElevenLabs API
-function sanitizeScriptForElevenLabs(text: string): string {
-  console.log("🧹 Starting comprehensive script sanitization for ElevenLabs...")
-
-  // FIRST: Apply basic ASCII sanitization
-  let sanitized = sanitizeScript(text)
-
-  console.log("📝 After basic sanitization:", sanitized.length)
-
-  // THEN: Apply additional ElevenLabs-specific cleaning
-  sanitized = sanitized
-    .replace(/\$(\d+)/g, "$1 dollars")
-    .replace(/(\d+)\s*sq\s*ft/gi, "$1 square feet")
-    .replace(/(\d+)\s*bed/gi, "$1 bedroom")
-    .replace(/(\d+)\s*bath/gi, "$1 bathroom")
-    .trim()
-
-  // Ensure proper sentence ending
-  if (sanitized && !/[.!?]$/.test(sanitized)) {
-    sanitized += "."
-  }
-
-  console.log("✅ Final ElevenLabs sanitization complete")
-  console.log("📝 Final length:", sanitized.length)
-  console.log("🔍 Final sample:", sanitized.substring(0, 100) + "...")
-
-  return sanitized
-}
-
-// Validate that text is proper UTF-8
-function validateUTF8(text: string): boolean {
-  try {
-    // Try to encode and decode the text
-    const encoded = new TextEncoder().encode(text)
-    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(encoded)
-    return decoded === text
-  } catch (error) {
-    console.error("❌ UTF-8 validation failed:", error)
-    return false
-  }
-}
-
 // PHOTO-BASED VIDEO DURATION CALCULATION - SUPPORTS UP TO 30 PHOTOS
 function calculateVideoDurationFromPhotos(photoCount: number): {
   totalDuration: number
@@ -196,7 +154,7 @@ function adjustScriptForDuration(script: string, targetDuration: number, speakin
   return script
 }
 
-// Generate ElevenLabs Rachel voiceover with DYNAMIC VOICE VARIATIONS and DURATION MATCHING
+// FIXED: Generate ElevenLabs Rachel voiceover with proper response handling
 async function generateRachelVoiceWithWordTimestamps(
   script: string,
   address: string,
@@ -213,7 +171,7 @@ async function generateRachelVoiceWithWordTimestamps(
   voiceVariation?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover with DYNAMIC VOICE VARIATION and DURATION MATCHING...")
+    console.log("🎤 Generating Rachel voiceover with FIXED response handling...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -238,12 +196,11 @@ async function generateRachelVoiceWithWordTimestamps(
     // Step 3: Apply the sanitization function
     const cleanScript = sanitizeScript(adjustedScript)
 
-    // Log the cleaned script for verification
     console.log("🧹 SANITIZED SCRIPT FOR ELEVENLABS:")
     console.log("📝 Original length:", script.length)
     console.log("📝 Adjusted length:", adjustedScript.length)
     console.log("📝 Cleaned length:", cleanScript.length)
-    console.log("🔍 Cleaned script:", cleanScript)
+    console.log("🔍 Cleaned script:", cleanScript.substring(0, 200) + "...")
 
     // Step 4: Validate cleaned script
     if (cleanScript.length === 0) {
@@ -254,9 +211,9 @@ async function generateRachelVoiceWithWordTimestamps(
       throw new Error("Script too long for ElevenLabs (max 5000 characters after sanitization)")
     }
 
-    // Step 5: Prepare the request payload with DYNAMIC VOICE SETTINGS
+    // Step 5: FIXED - Request audio only (no timestamps) for reliable audio generation
     const requestPayload = {
-      text: cleanScript, // Use sanitized script
+      text: cleanScript,
       model_id: "eleven_monolingual_v1",
       voice_settings: {
         stability: selectedVariation.stability,
@@ -267,14 +224,14 @@ async function generateRachelVoiceWithWordTimestamps(
       },
       output_format: "mp3_44100_128",
       enable_logging: false,
-      timestamps: "word", // Enable word-level timestamps
+      // REMOVED: timestamps: "word" - This was causing JSON response instead of audio
     }
 
     console.log(`📦 ElevenLabs payload prepared with ${selectedVariationKey} voice variation`)
     console.log("🎛️ Voice settings:", requestPayload.voice_settings)
 
-    // Step 6: Make API request with DYNAMIC VOICE SETTINGS
-    console.log("📡 Making ElevenLabs API request with dynamic voice variation...")
+    // Step 6: Make API request for AUDIO ONLY
+    console.log("📡 Making ElevenLabs API request for audio generation...")
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM`, {
       method: "POST",
@@ -291,18 +248,28 @@ async function generateRachelVoiceWithWordTimestamps(
     if (!response.ok) {
       const errorText = await response.text()
       console.error("❌ ElevenLabs API error:", response.status, errorText)
-      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
+
+      let errorMessage = `ElevenLabs API error: ${response.status}`
+      if (response.status === 401) {
+        errorMessage = "ElevenLabs API key is invalid or expired"
+      } else if (response.status === 429) {
+        errorMessage = "ElevenLabs API rate limit exceeded"
+      } else if (response.status === 422) {
+        errorMessage = "ElevenLabs rejected the text (too long or invalid characters)"
+      }
+
+      throw new Error(errorMessage)
     }
 
-    // Step 7: Handle audio response (not JSON)
+    // Step 7: FIXED - Handle audio response properly
     const audioBlob = await response.blob()
-    console.log(`🎵 Audio blob received: ${audioBlob.size} bytes`)
+    console.log(`🎵 Audio blob received: ${audioBlob.size} bytes, type: ${audioBlob.type}`)
 
     if (audioBlob.size === 0) {
       throw new Error("ElevenLabs returned empty audio")
     }
 
-    // Convert to data URL
+    // Convert to data URL for immediate use
     const arrayBuffer = await audioBlob.arrayBuffer()
     const base64Audio = Buffer.from(arrayBuffer).toString("base64")
     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
@@ -310,17 +277,18 @@ async function generateRachelVoiceWithWordTimestamps(
     // Step 8: Generate fallback word timings with DURATION MATCHING
     console.log("⚠️ Using fallback word timing generation with duration matching")
     const words = adjustedScript.split(/\s+/).filter((w) => w.length > 0)
-    const wordTimings = generateFallbackWordTimings(words, 0, selectedVariation.speaking_rate, targetDuration)
+    const wordTimings = generateFallbackWordTimings(words, 0.5, selectedVariation.speaking_rate, targetDuration)
 
-    console.log("✅ Rachel voice generated successfully with dynamic variation and duration matching")
+    console.log("✅ Rachel voice generated successfully with FIXED audio handling")
     console.log(`🎭 Voice style: ${selectedVariationKey} (${selectedVariation.description})`)
     console.log(`📊 ${wordTimings.length} words timed over ${targetDuration.toFixed(1)}s`)
+    console.log(`🎵 Audio data URL length: ${audioDataUrl.length} characters`)
 
     return {
       success: true,
       audioUrl: audioDataUrl,
       wordTimings,
-      duration: targetDuration, // Use target duration for consistency
+      duration: targetDuration,
       alignmentUsed: false, // Using fallback timing
       originalScript: script,
       sanitizedScript: cleanScript,
@@ -434,7 +402,7 @@ function generatePreciseWordCaptions(
           .join(" ")
           .toUpperCase(),
         words: captionWords,
-        startTime: captionWords[0].startTime, // Already includes audio delay
+        startTime: captionWords[0].startTime,
         endTime: captionWords[captionWords.length - 1].endTime,
       })
     }
@@ -494,7 +462,7 @@ function generateSentenceCaptions(
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 COMPLETE VIDEO GENERATION WITH PHOTO-BASED DURATION AND DYNAMIC VOICE VARIATIONS")
+    console.log("🎬 COMPLETE VIDEO GENERATION WITH FIXED AUDIO HANDLING")
 
     const data: VideoRequest = await request.json()
 
@@ -515,13 +483,15 @@ export async function POST(request: NextRequest) {
     // Step 1: Calculate video duration based on photo count (supports up to 30 photos)
     const videoDuration = calculateVideoDurationFromPhotos(data.imageUrls.length)
 
-    // Step 2: Generate Rachel voice with DYNAMIC VOICE VARIATION and DURATION MATCHING
+    // Step 2: Generate Rachel voice with FIXED audio handling
     const audioResult = await generateRachelVoiceWithWordTimestamps(
       data.script,
       data.address,
       videoDuration.totalDuration,
     )
+
     if (!audioResult.success) {
+      console.error("❌ Audio generation failed:", audioResult.error)
       return NextResponse.json({ error: `Voice generation failed: ${audioResult.error}` }, { status: 500 })
     }
 
@@ -541,7 +511,7 @@ export async function POST(request: NextRequest) {
     )
     console.log(`📸 Photo timing: ${videoDuration.timePerPhoto.toFixed(2)}s per photo`)
     console.log(
-      `🎤 Rachel voice: ${audioResult.voiceVariation || "standard variation"}, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
+      `🎤 Rachel voice: ${audioResult.voiceVariation || "standard variation"}, audio generated: ${audioResult.success ? "YES" : "NO"}`,
     )
     console.log(`📝 Captions: ${captions.length} chunks with precise timing`)
 
@@ -584,7 +554,7 @@ export async function POST(request: NextRequest) {
       },
       metadata: {
         alignmentUsed: audioResult.alignmentUsed || false,
-        captionDelay: 0, // No artificial delay - using precise timestamps
+        captionDelay: 0,
         captionType: audioResult.alignmentUsed ? "word-precise" : "sentence-estimated",
         scriptSanitized: true,
         originalScriptLength: data.script.length,
@@ -593,6 +563,8 @@ export async function POST(request: NextRequest) {
         durationMethod: "photo-based",
         photosProcessed: videoDuration.actualPhotoCount,
         photosReceived: data.imageUrls.length,
+        audioGenerated: audioResult.success,
+        audioError: audioResult.error || null,
       },
     })
   } catch (error) {
