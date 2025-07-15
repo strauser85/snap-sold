@@ -77,117 +77,69 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
     })
   }, [])
 
-  // OPTIMIZED IMAGE PRIORITIZATION AND TIMING - FASTER PROCESSING
-  const createImageDisplayPlan = useCallback((imageUrls: string[], totalDuration: number): ImageDisplayPlan[] => {
-    const imageCount = imageUrls.length
-    console.log(`📸 FAST planning for ${imageCount} images over ${totalDuration.toFixed(1)}s`)
+  // PHOTO-BASED IMAGE DISPLAY PLANNING WITH SMOOTH TRANSITIONS
+  const createPhotoBasedImageDisplayPlan = useCallback(
+    (imageUrls: string[], totalDuration: number, introTime: number, outroTime: number): ImageDisplayPlan[] => {
+      const imageCount = imageUrls.length
+      console.log(`📸 Creating photo-based display plan for ${imageCount} images`)
+      console.log(`📊 Total: ${totalDuration}s, Intro: ${introTime}s, Outro: ${outroTime}s`)
 
-    const displayPlan: ImageDisplayPlan[] = []
+      const displayPlan: ImageDisplayPlan[] = []
+      const photoDisplayTime = totalDuration - introTime - outroTime
+      const timePerPhoto = photoDisplayTime / imageCount
 
-    if (imageCount < 10) {
-      // UNDER 10 PHOTOS: Quick extend and reuse
-      console.log(`📸 Fast processing: Under 10 photos - extending time`)
-      const baseTimePerImage = totalDuration / Math.max(imageCount, 8)
-      const keyImageIndices = [0, 1, 2] // First 3 are key
+      console.log(`📸 Photo display time: ${photoDisplayTime}s (${timePerPhoto.toFixed(2)}s per photo)`)
 
-      let currentTime = 0
-      let imageIndex = 0
-
-      while (currentTime < totalDuration) {
-        const timeForThisImage = Math.min(baseTimePerImage, totalDuration - currentTime)
-        const actualImageIndex = imageIndex % imageCount
-        const isReused = imageIndex >= imageCount
-
-        displayPlan.push({
-          imageUrl: imageUrls[actualImageIndex],
-          startTime: currentTime,
-          endTime: currentTime + timeForThisImage,
-          duration: timeForThisImage,
-          isReused,
-          priority: keyImageIndices.includes(actualImageIndex) ? 5 : 3,
-        })
-
-        currentTime += timeForThisImage
-        imageIndex++
-        if (currentTime >= totalDuration) break
-      }
-    } else if (imageCount >= 20 && imageCount <= 30) {
-      // IDEAL CASE: Fast even spacing
-      console.log(`📸 Fast processing: Ideal count (${imageCount}) - even spacing`)
-      const timePerImage = totalDuration / imageCount
-
+      // Create evenly spaced photo timeline
       imageUrls.forEach((url, index) => {
-        displayPlan.push({
-          imageUrl: url,
-          startTime: index * timePerImage,
-          endTime: (index + 1) * timePerImage,
-          duration: timePerImage,
-          isReused: false,
-          priority: 3,
-        })
-      })
-    } else if (imageCount > 30) {
-      // TOO MANY: Fast prioritization - take first 20 only
-      console.log(`📸 Fast processing: Too many (${imageCount}) - using first 20`)
-      const maxImages = 20 // Reduced for faster processing
-      const selectedImages = imageUrls.slice(0, maxImages)
-      const timePerImage = totalDuration / selectedImages.length
+        const startTime = introTime + index * timePerPhoto
+        const endTime = introTime + (index + 1) * timePerPhoto
 
-      selectedImages.forEach((url, index) => {
         displayPlan.push({
           imageUrl: url,
-          startTime: index * timePerImage,
-          endTime: (index + 1) * timePerImage,
-          duration: timePerImage,
+          startTime,
+          endTime,
+          duration: timePerPhoto,
           isReused: false,
-          priority: index < 5 ? 5 : 3, // First 5 are high priority
+          priority: index < 3 ? 5 : 3, // First 3 photos are high priority
         })
-      })
-    } else {
-      // DEFAULT: Fast even spacing
-      const timePerImage = totalDuration / imageCount
-      imageUrls.forEach((url, index) => {
-        displayPlan.push({
-          imageUrl: url,
-          startTime: index * timePerImage,
-          endTime: (index + 1) * timePerImage,
-          duration: timePerImage,
-          isReused: false,
-          priority: 3,
-        })
-      })
-    }
 
-    console.log(
-      `📸 FAST plan complete: ${displayPlan.length} slots, avg ${(totalDuration / displayPlan.length).toFixed(1)}s each`,
-    )
-    return displayPlan
-  }, [])
+        console.log(
+          `📸 Photo ${index + 1}: ${startTime.toFixed(2)}s - ${endTime.toFixed(2)}s (${timePerPhoto.toFixed(2)}s)`,
+        )
+      })
+
+      console.log(`✅ Photo-based plan complete: ${displayPlan.length} photos evenly spaced`)
+      return displayPlan
+    },
+    [],
+  )
 
   const extractHighlightCaptions = useCallback(
     (script: string, duration: number): HighlightCaption[] => {
       const highlights: HighlightCaption[] = []
       const scriptLower = script.toLowerCase()
 
-      console.log("🎯 FAST extracting highlights...")
+      console.log("🎯 Extracting highlights for photo-based timing...")
 
-      // STREAMLINED CAPTION CREATION - FEWER CAPTIONS FOR FASTER PROCESSING
+      // INTRO CAPTION (during intro time)
       if (scriptLower.includes("attention") || scriptLower.includes("stop") || scriptLower.includes("look")) {
         highlights.push({
           text: "🔥 ATTENTION HOME BUYERS",
-          startTime: 0.5,
-          endTime: 3.0, // Shorter duration
+          startTime: 0.2,
+          endTime: 1.3,
           priority: 5,
         })
       } else {
         highlights.push({
           text: "🏠 STUNNING PROPERTY ALERT",
-          startTime: 0.5,
-          endTime: 3.0,
+          startTime: 0.2,
+          endTime: 1.3,
           priority: 5,
         })
       }
 
+      // PROPERTY DETAILS (early in photo sequence)
       const bedroomText = propertyData.bedrooms === 1 ? "1 BEDROOM" : `${propertyData.bedrooms} BEDROOMS`
       const bathroomText =
         propertyData.bathrooms === 1
@@ -214,13 +166,14 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         priority: 4,
       })
 
-      // SIMPLIFIED FEATURE DETECTION
+      // FEATURE HIGHLIGHT (middle of photo sequence)
       let featureText = "PREMIUM FEATURES THROUGHOUT"
       if (propertyData.propertyDescription) {
         const desc = propertyData.propertyDescription.toLowerCase()
         if (desc.includes("kitchen")) featureText = "LUXURY KITCHEN W/ UPGRADES"
         else if (desc.includes("pool")) featureText = "SPARKLING POOL + OUTDOOR SPACE"
         else if (desc.includes("garage")) featureText = "2-CAR GARAGE + STORAGE"
+        else if (desc.includes("fireplace")) featureText = "COZY FIREPLACE + OPEN FLOOR PLAN"
       }
 
       highlights.push({
@@ -230,6 +183,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         priority: 3,
       })
 
+      // PRICE HIGHLIGHT (late in photo sequence)
       const priceText =
         propertyData.price >= 1000000
           ? `$${(propertyData.price / 1000000).toFixed(1)}M – INCREDIBLE VALUE`
@@ -238,28 +192,56 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       highlights.push({
         text: priceText.toUpperCase(),
         startTime: duration * 0.7,
-        endTime: duration - 0.5,
+        endTime: duration * 0.9,
         priority: 5,
       })
 
-      console.log(`✅ FAST created ${highlights.length} highlights`)
+      // CALL TO ACTION (outro time)
+      if (scriptLower.includes("dm") || scriptLower.includes("message")) {
+        highlights.push({
+          text: "📱 DM ME NOW!",
+          startTime: duration * 0.9,
+          endTime: duration - 0.2,
+          priority: 5,
+        })
+      } else if (scriptLower.includes("call")) {
+        highlights.push({
+          text: "📞 CALL TODAY!",
+          startTime: duration * 0.9,
+          endTime: duration - 0.2,
+          priority: 5,
+        })
+      } else {
+        highlights.push({
+          text: "💬 CONTACT ME TODAY!",
+          startTime: duration * 0.9,
+          endTime: duration - 0.2,
+          priority: 4,
+        })
+      }
+
+      console.log(`✅ Created ${highlights.length} photo-timed highlight captions`)
+      highlights.forEach((h, i) => {
+        console.log(`   ${i + 1}. "${h.text}" (${h.startTime.toFixed(1)}s - ${h.endTime.toFixed(1)}s)`)
+      })
+
       return highlights
     },
     [propertyData],
   )
 
-  // OPTIMIZED CAPTION RENDERING - FASTER CALCULATIONS
+  // OPTIMIZED CAPTION RENDERING - CONSISTENT STYLING
   const calculateCaptionRenderInfo = useCallback(
     (ctx: CanvasRenderingContext2D, text: string, canvas: HTMLCanvasElement, priority: number): CaptionRenderInfo => {
       const displayText = text.toUpperCase()
       const maxWidth = canvas.width * 0.9
       const bottomPadding = canvas.height * 0.1
 
-      // FIXED FONT SIZE - NO COMPLEX CALCULATIONS
+      // FIXED FONT SIZE - CONSISTENT ACROSS ALL CAPTIONS
       const fontSize = Math.floor(canvas.width * 0.08)
       ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
 
-      // SIMPLE LINE BREAKING - FASTER PROCESSING
+      // SIMPLE LINE BREAKING
       const words = displayText.split(" ")
       const lines: string[] = []
       let currentLine = ""
@@ -304,9 +286,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const { text, startTime, endTime } = caption
       const displayText = text.toUpperCase()
 
-      // FASTER OPACITY CALCULATION
+      // SMOOTH FADE TRANSITIONS
       let opacity = 1
-      const fadeTime = 0.3 // Reduced from 0.5 for snappier transitions
+      const fadeTime = 0.3 // Quick fade for smooth transitions
       if (currentTime < startTime + fadeTime) {
         opacity = (currentTime - startTime) / fadeTime
       } else if (currentTime > endTime - fadeTime) {
@@ -316,7 +298,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       if (opacity <= 0) return
 
-      // FIXED FONT SIZE - NO DYNAMIC CALCULATIONS
+      // CONSISTENT FONT SIZE
       const fontSize = Math.floor(canvas.width * 0.08)
       ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
       ctx.textAlign = "center"
@@ -346,17 +328,17 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         lines.push(currentLine)
       }
 
-      // FIXED POSITIONING
+      // CONSISTENT POSITIONING
       const lineHeight = fontSize * 1.3
       const bottomPadding = canvas.height * 0.1
       const totalTextHeight = lines.length * lineHeight
       const startY = canvas.height - bottomPadding - totalTextHeight + lineHeight * 0.8
 
-      // STREAMLINED DRAWING - FEWER EFFECTS FOR SPEED
+      // STREAMLINED DRAWING WITH SMOOTH TRANSITIONS
       lines.forEach((line, lineIndex) => {
         const y = startY + lineIndex * lineHeight
 
-        // SIMPLIFIED BACKGROUND
+        // BACKGROUND BOX
         const textMetrics = ctx.measureText(line)
         const textWidth = textMetrics.width
         const padding = fontSize * 0.6
@@ -368,7 +350,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * opacity})`
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
-        // SINGLE STROKE FOR SPEED
+        // TEXT STROKE
         ctx.strokeStyle = `rgba(0, 0, 0, ${opacity})`
         ctx.lineWidth = Math.floor(fontSize * 0.15)
         ctx.strokeText(line, canvas.width / 2, y)
@@ -415,7 +397,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       canvas.width = 1080
       canvas.height = 1920
 
-      console.log("🎬 Starting OPTIMIZED video generation - 1080x1920 MP4")
+      console.log("🎬 Starting PHOTO-BASED video generation - 1080x1920 MP4")
 
       const audioData = await generateAudio(propertyData.script)
       setProgress(20)
@@ -425,9 +407,16 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       console.log(`🎵 Audio duration: ${audioData.duration}s`)
+      console.log(`📸 Video based on ${propertyData.imageUrls.length} photos`)
+      console.log(`📊 Duration breakdown:`, audioData.videoDuration)
 
-      // FAST image display planning
-      const imageDisplayPlan = createImageDisplayPlan(propertyData.imageUrls, audioData.duration)
+      // Create PHOTO-BASED image display plan
+      const imageDisplayPlan = createPhotoBasedImageDisplayPlan(
+        propertyData.imageUrls,
+        audioData.duration,
+        audioData.videoDuration.intro,
+        audioData.videoDuration.outro,
+      )
 
       const audio = audioRef.current!
       audio.src = audioData.audioUrl
@@ -450,11 +439,10 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       const highlightCaptions = extractHighlightCaptions(propertyData.script, audioData.duration)
       setProgress(40)
 
-      // OPTIMIZED IMAGE LOADING - PARALLEL PROCESSING
+      // PARALLEL IMAGE LOADING for faster processing
       const loadedImages: { [key: string]: HTMLImageElement } = {}
       const uniqueImageUrls = [...new Set(imageDisplayPlan.map((plan) => plan.imageUrl))]
 
-      // Load images in parallel for faster processing
       const imagePromises = uniqueImageUrls.map(async (url, index) => {
         try {
           const img = await loadImage(url)
@@ -554,7 +542,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
             type: mediaRecorder.mimeType.includes("mp4") ? "video/mp4" : "video/webm",
           })
 
-          console.log(`✅ OPTIMIZED video created: ${videoBlob.size} bytes (${mediaRecorder.mimeType})`)
+          console.log(`✅ PHOTO-BASED video created: ${videoBlob.size} bytes (${mediaRecorder.mimeType})`)
 
           const videoUrl = URL.createObjectURL(videoBlob)
           setProgress(100)
@@ -572,7 +560,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       }
 
       setProgress(75)
-      console.log("🎬 Starting OPTIMIZED recording...")
+      console.log("🎬 Starting PHOTO-BASED recording...")
 
       mediaRecorder.start(100)
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -580,7 +568,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       audio.currentTime = 0
       await audio.play()
 
-      console.log("🎵 Audio and video recording started")
+      console.log("🎵 Audio and video recording started with photo-based timing")
 
       const recordingStartTime = Date.now()
       const durationMs = audioData.duration * 1000
@@ -596,7 +584,7 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
           return
         }
 
-        // OPTIMIZED IMAGE FINDING
+        // FIND CURRENT IMAGE BASED ON PHOTO-BASED TIMING
         const currentImagePlan = imageDisplayPlan.find(
           (plan) => elapsedSeconds >= plan.startTime && elapsedSeconds < plan.endTime,
         )
@@ -608,23 +596,42 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
         if (currentImagePlan) {
           const img = loadedImages[currentImagePlan.imageUrl]
           if (img && img.complete) {
-            // FAST DRAWING
+            // SMOOTH IMAGE TRANSITIONS
             ctx.fillStyle = "#000000"
             ctx.fillRect(0, 0, canvas.width, canvas.height)
 
+            // Calculate transition progress for smooth fades
+            const transitionTime = 0.2 // 0.2 second transition
+            const planProgress = (elapsedSeconds - currentImagePlan.startTime) / currentImagePlan.duration
+            let imageOpacity = 1
+
+            // Fade in at start
+            if (planProgress < transitionTime / currentImagePlan.duration) {
+              imageOpacity = planProgress / (transitionTime / currentImagePlan.duration)
+            }
+            // Fade out at end
+            else if (planProgress > 1 - transitionTime / currentImagePlan.duration) {
+              imageOpacity = (1 - planProgress) / (transitionTime / currentImagePlan.duration)
+            }
+
+            imageOpacity = Math.max(0, Math.min(1, imageOpacity))
+
+            // Draw image with smooth scaling
             const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
             const scaledWidth = img.width * scale
             const scaledHeight = img.height * scale
             const x = (canvas.width - scaledWidth) / 2
             const y = (canvas.height - scaledHeight) / 2
 
+            ctx.globalAlpha = imageOpacity
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+            ctx.globalAlpha = 1
 
             if (currentHighlight) {
               drawHighlightCaption(ctx, currentHighlight, canvas, elapsedSeconds)
             }
 
-            // OPTIMIZED PROPERTY OVERLAY - SCALED FOR 1080p
+            // PROPERTY OVERLAY - SCALED FOR 1080p
             const overlayGradient = ctx.createLinearGradient(0, 0, 0, 150)
             overlayGradient.addColorStop(0, "rgba(0, 0, 0, 0.9)")
             overlayGradient.addColorStop(1, "rgba(0, 0, 0, 0.3)")
@@ -658,14 +665,14 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       animate()
     } catch (error) {
-      console.error("❌ OPTIMIZED video generation failed:", error)
+      console.error("❌ PHOTO-BASED video generation failed:", error)
       onError(error instanceof Error ? error.message : "Video generation failed")
     }
   }, [
     propertyData,
     generateAudio,
     loadImage,
-    createImageDisplayPlan,
+    createPhotoBasedImageDisplayPlan,
     extractHighlightCaptions,
     drawHighlightCaption,
     onVideoGenerated,

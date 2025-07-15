@@ -69,6 +69,50 @@ function validateUTF8(text: string): boolean {
   }
 }
 
+// PHOTO-BASED VIDEO DURATION CALCULATION
+function calculateVideoDurationFromPhotos(photoCount: number): {
+  totalDuration: number
+  timePerPhoto: number
+  introTime: number
+  outroTime: number
+  photoDisplayTime: number
+} {
+  console.log(`📸 Calculating video duration for ${photoCount} photos`)
+
+  // Base timing rules
+  const baseTimePerPhoto = 1.5 // 1.5 seconds per photo
+  const introTime = 1.5 // 1.5 seconds intro
+  const outroTime = 1.5 // 1.5 seconds outro
+  const maxTotalDuration = 60 // Cap at 60 seconds for 30 photos
+
+  // Calculate photo display time
+  let photoDisplayTime = photoCount * baseTimePerPhoto
+  let totalDuration = photoDisplayTime + introTime + outroTime
+
+  // Apply 60-second cap for max photos
+  if (totalDuration > maxTotalDuration) {
+    console.log(`⚠️ Video would be ${totalDuration}s, capping at ${maxTotalDuration}s`)
+    totalDuration = maxTotalDuration
+    photoDisplayTime = totalDuration - introTime - outroTime
+  }
+
+  const timePerPhoto = photoDisplayTime / photoCount
+
+  console.log(`📊 Video timing calculated:`)
+  console.log(`   • Total duration: ${totalDuration}s`)
+  console.log(`   • Intro: ${introTime}s`)
+  console.log(`   • Photos: ${photoDisplayTime}s (${timePerPhoto.toFixed(2)}s each)`)
+  console.log(`   • Outro: ${outroTime}s`)
+
+  return {
+    totalDuration,
+    timePerPhoto,
+    introTime,
+    outroTime,
+    photoDisplayTime,
+  }
+}
+
 // DYNAMIC VOICE VARIATIONS - Different settings for personality
 const VOICE_VARIATIONS = {
   energetic: {
@@ -108,10 +152,45 @@ const VOICE_VARIATIONS = {
   },
 }
 
-// Generate ElevenLabs Rachel voiceover with DYNAMIC VOICE VARIATIONS
+// ADJUST SCRIPT PACING TO MATCH VIDEO DURATION
+function adjustScriptForDuration(script: string, targetDuration: number, speakingRate: number): string {
+  console.log(`📝 Adjusting script pacing for ${targetDuration}s target duration`)
+
+  const words = script.split(/\s+/)
+  const estimatedCurrentDuration = (words.length / (150 * speakingRate)) * 60
+
+  console.log(`📊 Current estimated duration: ${estimatedCurrentDuration.toFixed(1)}s`)
+  console.log(`🎯 Target duration: ${targetDuration}s`)
+
+  // If script is too long, add pauses and slower pacing cues
+  if (estimatedCurrentDuration > targetDuration + 2) {
+    console.log("⚠️ Script too long - adding pacing adjustments")
+    return script
+      .replace(/\./g, ". ") // Add extra space after periods
+      .replace(/,/g, ", ") // Add extra space after commas
+      .replace(/!/g, "! ") // Add extra space after exclamations
+  }
+
+  // If script is too short, add descriptive elements
+  if (estimatedCurrentDuration < targetDuration - 2) {
+    console.log("⚠️ Script too short - adding descriptive elements")
+    // Add natural extensions without changing core message
+    return script
+      .replace(/bedroom/gi, "spacious bedroom")
+      .replace(/bathroom/gi, "beautiful bathroom")
+      .replace(/kitchen/gi, "stunning kitchen")
+      .replace(/home/gi, "incredible home")
+  }
+
+  console.log("✅ Script pacing is appropriate for target duration")
+  return script
+}
+
+// Generate ElevenLabs Rachel voiceover with DYNAMIC VOICE VARIATIONS and DURATION MATCHING
 async function generateRachelVoiceWithWordTimestamps(
   script: string,
   address: string,
+  targetDuration: number,
 ): Promise<{
   success: boolean
   audioUrl?: string
@@ -124,7 +203,7 @@ async function generateRachelVoiceWithWordTimestamps(
   voiceVariation?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover with DYNAMIC VOICE VARIATION...")
+    console.log("🎤 Generating Rachel voiceover with DYNAMIC VOICE VARIATION and DURATION MATCHING...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -135,10 +214,7 @@ async function generateRachelVoiceWithWordTimestamps(
       throw new Error("ElevenLabs API key appears invalid")
     }
 
-    // Step 1: Apply the sanitization function before ElevenLabs
-    const cleanScript = sanitizeScript(script)
-
-    // Step 2: SELECT DYNAMIC VOICE VARIATION based on address
+    // Step 1: SELECT DYNAMIC VOICE VARIATION based on address
     const addressSeed = address.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)
     const variationKeys = Object.keys(VOICE_VARIATIONS)
     const selectedVariationKey = variationKeys[addressSeed % variationKeys.length]
@@ -146,13 +222,20 @@ async function generateRachelVoiceWithWordTimestamps(
 
     console.log(`🎭 Selected voice variation: ${selectedVariationKey} (${selectedVariation.description})`)
 
+    // Step 2: Adjust script pacing for target duration
+    const adjustedScript = adjustScriptForDuration(script, targetDuration, selectedVariation.speaking_rate)
+
+    // Step 3: Apply the sanitization function
+    const cleanScript = sanitizeScript(adjustedScript)
+
     // Log the cleaned script for verification
     console.log("🧹 SANITIZED SCRIPT FOR ELEVENLABS:")
     console.log("📝 Original length:", script.length)
+    console.log("📝 Adjusted length:", adjustedScript.length)
     console.log("📝 Cleaned length:", cleanScript.length)
     console.log("🔍 Cleaned script:", cleanScript)
 
-    // Step 3: Validate cleaned script
+    // Step 4: Validate cleaned script
     if (cleanScript.length === 0) {
       throw new Error("Script is empty after sanitization")
     }
@@ -161,10 +244,7 @@ async function generateRachelVoiceWithWordTimestamps(
       throw new Error("Script too long for ElevenLabs (max 5000 characters after sanitization)")
     }
 
-    console.log("📝 Original script:", script.substring(0, 100) + "...")
-    console.log("🧹 Sanitized script:", cleanScript.substring(0, 100) + "...")
-
-    // Step 4: Prepare the request payload with DYNAMIC VOICE SETTINGS
+    // Step 5: Prepare the request payload with DYNAMIC VOICE SETTINGS
     const requestPayload = {
       text: cleanScript, // Use sanitized script
       model_id: "eleven_monolingual_v1",
@@ -182,9 +262,8 @@ async function generateRachelVoiceWithWordTimestamps(
 
     console.log(`📦 ElevenLabs payload prepared with ${selectedVariationKey} voice variation`)
     console.log("🎛️ Voice settings:", requestPayload.voice_settings)
-    console.log("🔍 Final payload text:", requestPayload.text)
 
-    // Step 5: Make API request with DYNAMIC VOICE SETTINGS
+    // Step 6: Make API request with DYNAMIC VOICE SETTINGS
     console.log("📡 Making ElevenLabs API request with dynamic voice variation...")
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM`, {
@@ -205,7 +284,7 @@ async function generateRachelVoiceWithWordTimestamps(
       throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
     }
 
-    // Step 6: Handle audio response (not JSON)
+    // Step 7: Handle audio response (not JSON)
     const audioBlob = await response.blob()
     console.log(`🎵 Audio blob received: ${audioBlob.size} bytes`)
 
@@ -218,21 +297,20 @@ async function generateRachelVoiceWithWordTimestamps(
     const base64Audio = Buffer.from(arrayBuffer).toString("base64")
     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
-    // Step 7: Generate fallback word timings with DYNAMIC PACING
-    console.log("⚠️ Using fallback word timing generation with dynamic pacing")
-    const words = script.split(/\s+/).filter((w) => w.length > 0)
-    const wordTimings = generateFallbackWordTimings(words, 0, selectedVariation.speaking_rate)
-    const totalDuration = estimateDuration(cleanScript, selectedVariation.speaking_rate)
+    // Step 8: Generate fallback word timings with DURATION MATCHING
+    console.log("⚠️ Using fallback word timing generation with duration matching")
+    const words = adjustedScript.split(/\s+/).filter((w) => w.length > 0)
+    const wordTimings = generateFallbackWordTimings(words, 0, selectedVariation.speaking_rate, targetDuration)
 
-    console.log("✅ Rachel voice generated successfully with dynamic variation")
+    console.log("✅ Rachel voice generated successfully with dynamic variation and duration matching")
     console.log(`🎭 Voice style: ${selectedVariationKey} (${selectedVariation.description})`)
-    console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
+    console.log(`📊 ${wordTimings.length} words timed over ${targetDuration.toFixed(1)}s`)
 
     return {
       success: true,
       audioUrl: audioDataUrl,
       wordTimings,
-      duration: totalDuration,
+      duration: targetDuration, // Use target duration for consistency
       alignmentUsed: false, // Using fallback timing
       originalScript: script,
       sanitizedScript: cleanScript,
@@ -249,22 +327,26 @@ async function generateRachelVoiceWithWordTimestamps(
   }
 }
 
-// Generate fallback word timings with DYNAMIC PACING based on voice variation
-function generateFallbackWordTimings(words: string[], audioStartDelay = 0.5, speakingRate = 0.85): WordTiming[] {
+// Generate fallback word timings with DURATION MATCHING
+function generateFallbackWordTimings(
+  words: string[],
+  audioStartDelay = 0.5,
+  speakingRate = 0.85,
+  targetDuration: number,
+): WordTiming[] {
   const wordTimings: WordTiming[] = []
-  let currentTime = audioStartDelay // Wait for audio to actually start
+  const availableTime = targetDuration - audioStartDelay - 0.5 // Leave 0.5s at end
+  let currentTime = audioStartDelay
 
-  // DYNAMIC speech timing based on speaking rate
-  const baseWordsPerSecond = 2.2 * speakingRate // Adjusted for voice variation
-
-  words.forEach((word, index) => {
-    let wordDuration = 0.45 / speakingRate // Base duration adjusted for speaking rate
+  // Calculate time per word to fit target duration
+  const totalWordTime = words.reduce((total, word) => {
+    let wordDuration = 0.45 / speakingRate // Base duration
 
     // Adjust for word characteristics
     if (word.length > 6) wordDuration += 0.15 / speakingRate
     if (word.length > 10) wordDuration += 0.25 / speakingRate
 
-    // Punctuation adds natural pauses (less pause for faster speech)
+    // Punctuation adds natural pauses
     if (word.includes(",")) wordDuration += 0.15 / speakingRate
     if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4 / speakingRate
 
@@ -273,23 +355,43 @@ function generateFallbackWordTimings(words: string[], audioStartDelay = 0.5, spe
     if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom"))
       wordDuration += 0.15 / speakingRate
 
+    return total + wordDuration + 0.08 / speakingRate // Include gap
+  }, 0)
+
+  // Scale timing to fit target duration
+  const scaleFactor = availableTime / totalWordTime
+  console.log(`📊 Scaling word timing by ${scaleFactor.toFixed(2)} to fit ${targetDuration}s`)
+
+  words.forEach((word, index) => {
+    let wordDuration = 0.45 / speakingRate
+
+    // Adjust for word characteristics
+    if (word.length > 6) wordDuration += 0.15 / speakingRate
+    if (word.length > 10) wordDuration += 0.25 / speakingRate
+
+    // Punctuation adds natural pauses
+    if (word.includes(",")) wordDuration += 0.15 / speakingRate
+    if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4 / speakingRate
+
+    // Numbers and property terms need more time
+    if (/\d/.test(word)) wordDuration += 0.2 / speakingRate
+    if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom"))
+      wordDuration += 0.15 / speakingRate
+
+    // Apply scale factor
+    wordDuration *= scaleFactor
+    const gapDuration = (0.08 / speakingRate) * scaleFactor
+
     wordTimings.push({
       word: word,
       startTime: currentTime,
       endTime: currentTime + wordDuration,
     })
 
-    currentTime += wordDuration + 0.08 / speakingRate // Natural gap between words adjusted for rate
+    currentTime += wordDuration + gapDuration
   })
 
   return wordTimings
-}
-
-// Estimate total duration with DYNAMIC SPEAKING RATE
-function estimateDuration(script: string, speakingRate = 0.85): number {
-  const wordCount = script.split(/\s+/).length
-  // Adjust for dynamic speaking rate
-  return Math.max(35, (wordCount / (150 * speakingRate)) * 60)
 }
 
 // Generate captions that sync with actual audio timing
@@ -382,7 +484,7 @@ function generateSentenceCaptions(
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 COMPLETE VIDEO GENERATION WITH DYNAMIC VOICE VARIATIONS")
+    console.log("🎬 COMPLETE VIDEO GENERATION WITH PHOTO-BASED DURATION AND DYNAMIC VOICE VARIATIONS")
 
     const data: VideoRequest = await request.json()
 
@@ -395,28 +497,34 @@ export async function POST(request: NextRequest) {
     console.log(`🖼️ Images: ${data.imageUrls.length}`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
-    // Step 1: Generate Rachel voice with DYNAMIC VOICE VARIATION and word timestamps
-    const audioResult = await generateRachelVoiceWithWordTimestamps(data.script, data.address)
+    // Step 1: Calculate video duration based on photo count
+    const videoDuration = calculateVideoDurationFromPhotos(data.imageUrls.length)
+
+    // Step 2: Generate Rachel voice with DYNAMIC VOICE VARIATION and DURATION MATCHING
+    const audioResult = await generateRachelVoiceWithWordTimestamps(
+      data.script,
+      data.address,
+      videoDuration.totalDuration,
+    )
     if (!audioResult.success) {
       return NextResponse.json({ error: `Voice generation failed: ${audioResult.error}` }, { status: 500 })
     }
-
-    // Step 2: Calculate video timing
-    const totalDuration = audioResult.duration || estimateDuration(data.script)
-    const timePerImage = Math.max(3, Math.floor(totalDuration / data.imageUrls.length))
 
     // Step 3: Generate captions with precise timing
     let captions: Array<{ text: string; words: WordTiming[]; startTime: number; endTime: number }>
 
     if (audioResult.wordTimings && audioResult.wordTimings.length > 0 && audioResult.alignmentUsed) {
       console.log("✅ Using precise word-based captions from ElevenLabs timestamps")
-      captions = generatePreciseWordCaptions(audioResult.wordTimings, totalDuration, 0.5)
+      captions = generatePreciseWordCaptions(audioResult.wordTimings, videoDuration.totalDuration, 0.5)
     } else {
       console.log("⚠️ Falling back to sentence-level captions with estimated timing")
-      captions = generateSentenceCaptions(data.script, totalDuration)
+      captions = generateSentenceCaptions(data.script, videoDuration.totalDuration)
     }
 
-    console.log(`📊 Video: ${totalDuration.toFixed(1)}s duration, ${timePerImage}s per image`)
+    console.log(
+      `📊 Video: ${videoDuration.totalDuration.toFixed(1)}s duration based on ${data.imageUrls.length} photos`,
+    )
+    console.log(`📸 Photo timing: ${videoDuration.timePerPhoto.toFixed(2)}s per photo`)
     console.log(
       `🎤 Rachel voice: ${audioResult.voiceVariation || "standard variation"}, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
     )
@@ -427,8 +535,8 @@ export async function POST(request: NextRequest) {
       success: true,
       audioUrl: audioResult.audioUrl,
       images: data.imageUrls,
-      duration: totalDuration,
-      timePerImage,
+      duration: videoDuration.totalDuration,
+      timePerImage: videoDuration.timePerPhoto,
       wordTimings: audioResult.wordTimings,
       captions,
       property: {
@@ -450,6 +558,14 @@ export async function POST(request: NextRequest) {
         alignmentUsed: audioResult.alignmentUsed || false,
         description: `Rachel voice with ${audioResult.voiceVariation || "standard variation"}${audioResult.alignmentUsed ? " and precise word timestamps" : " and estimated timing"}`,
       },
+      videoDuration: {
+        total: videoDuration.totalDuration,
+        intro: videoDuration.introTime,
+        photos: videoDuration.photoDisplayTime,
+        outro: videoDuration.outroTime,
+        perPhoto: videoDuration.timePerPhoto,
+        photoCount: data.imageUrls.length,
+      },
       metadata: {
         alignmentUsed: audioResult.alignmentUsed || false,
         captionDelay: 0, // No artificial delay - using precise timestamps
@@ -458,6 +574,7 @@ export async function POST(request: NextRequest) {
         originalScriptLength: data.script.length,
         sanitizedScriptLength: audioResult.sanitizedScript?.length || 0,
         voiceVariation: audioResult.voiceVariation || "standard",
+        durationMethod: "photo-based",
       },
     })
   } catch (error) {
