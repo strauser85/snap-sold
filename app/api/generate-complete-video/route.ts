@@ -69,8 +69,50 @@ function validateUTF8(text: string): boolean {
   }
 }
 
-// Generate ElevenLabs Rachel voiceover with sanitized input and proper JSON formatting
-async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
+// DYNAMIC VOICE VARIATIONS - Different settings for personality
+const VOICE_VARIATIONS = {
+  energetic: {
+    stability: 0.65,
+    similarity_boost: 0.9,
+    style: 0.35,
+    speaking_rate: 0.9,
+    description: "energetic and enthusiastic",
+  },
+  professional: {
+    stability: 0.85,
+    similarity_boost: 0.8,
+    style: 0.15,
+    speaking_rate: 0.8,
+    description: "professional and clear",
+  },
+  conversational: {
+    stability: 0.75,
+    similarity_boost: 0.85,
+    style: 0.25,
+    speaking_rate: 0.85,
+    description: "conversational and friendly",
+  },
+  confident: {
+    stability: 0.8,
+    similarity_boost: 0.88,
+    style: 0.3,
+    speaking_rate: 0.82,
+    description: "confident and persuasive",
+  },
+  warm: {
+    stability: 0.78,
+    similarity_boost: 0.83,
+    style: 0.2,
+    speaking_rate: 0.87,
+    description: "warm and inviting",
+  },
+}
+
+// Generate ElevenLabs Rachel voiceover with DYNAMIC VOICE VARIATIONS
+async function generateRachelVoiceWithWordTimestamps(
+  script: string,
+  address: string,
+): Promise<{
   success: boolean
   audioUrl?: string
   error?: string
@@ -79,9 +121,10 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
   alignmentUsed?: boolean
   originalScript?: string
   sanitizedScript?: string
+  voiceVariation?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover with sanitized script and word timestamps...")
+    console.log("🎤 Generating Rachel voiceover with DYNAMIC VOICE VARIATION...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -95,13 +138,21 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
     // Step 1: Apply the sanitization function before ElevenLabs
     const cleanScript = sanitizeScript(script)
 
+    // Step 2: SELECT DYNAMIC VOICE VARIATION based on address
+    const addressSeed = address.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)
+    const variationKeys = Object.keys(VOICE_VARIATIONS)
+    const selectedVariationKey = variationKeys[addressSeed % variationKeys.length]
+    const selectedVariation = VOICE_VARIATIONS[selectedVariationKey as keyof typeof VOICE_VARIATIONS]
+
+    console.log(`🎭 Selected voice variation: ${selectedVariationKey} (${selectedVariation.description})`)
+
     // Log the cleaned script for verification
     console.log("🧹 SANITIZED SCRIPT FOR ELEVENLABS:")
     console.log("📝 Original length:", script.length)
     console.log("📝 Cleaned length:", cleanScript.length)
     console.log("🔍 Cleaned script:", cleanScript)
 
-    // Step 2: Validate cleaned script
+    // Step 3: Validate cleaned script
     if (cleanScript.length === 0) {
       throw new Error("Script is empty after sanitization")
     }
@@ -113,30 +164,28 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
     console.log("📝 Original script:", script.substring(0, 100) + "...")
     console.log("🧹 Sanitized script:", cleanScript.substring(0, 100) + "...")
 
-    // Step 4: Prepare the request payload with cleaned script
+    // Step 4: Prepare the request payload with DYNAMIC VOICE SETTINGS
     const requestPayload = {
       text: cleanScript, // Use sanitized script
       model_id: "eleven_monolingual_v1",
       voice_settings: {
-        stability: 0.75,
-        similarity_boost: 0.85,
-        style: 0.25,
+        stability: selectedVariation.stability,
+        similarity_boost: selectedVariation.similarity_boost,
+        style: selectedVariation.style,
         use_speaker_boost: true,
-        speaking_rate: 0.85, // 85% speed for better readability
+        speaking_rate: selectedVariation.speaking_rate,
       },
       output_format: "mp3_44100_128",
       enable_logging: false,
       timestamps: "word", // Enable word-level timestamps
     }
 
-    console.log("📦 ElevenLabs payload prepared with cleaned script")
+    console.log(`📦 ElevenLabs payload prepared with ${selectedVariationKey} voice variation`)
+    console.log("🎛️ Voice settings:", requestPayload.voice_settings)
     console.log("🔍 Final payload text:", requestPayload.text)
 
-    console.log("📦 Request payload prepared with sanitized text")
-    console.log("🔍 Payload text sample:", requestPayload.text.substring(0, 50) + "...")
-
-    // Step 5: Make API request with properly formatted JSON
-    console.log("📡 Making ElevenLabs API request...")
+    // Step 5: Make API request with DYNAMIC VOICE SETTINGS
+    console.log("📡 Making ElevenLabs API request with dynamic voice variation...")
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM`, {
       method: "POST",
@@ -169,13 +218,14 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
     const base64Audio = Buffer.from(arrayBuffer).toString("base64")
     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
 
-    // Step 7: Generate fallback word timings (ElevenLabs basic API doesn't include timestamps)
-    console.log("⚠️ Using fallback word timing generation")
+    // Step 7: Generate fallback word timings with DYNAMIC PACING
+    console.log("⚠️ Using fallback word timing generation with dynamic pacing")
     const words = script.split(/\s+/).filter((w) => w.length > 0)
-    const wordTimings = generateFallbackWordTimings(words, 0)
-    const totalDuration = estimateDuration(cleanScript)
+    const wordTimings = generateFallbackWordTimings(words, 0, selectedVariation.speaking_rate)
+    const totalDuration = estimateDuration(cleanScript, selectedVariation.speaking_rate)
 
-    console.log("✅ Rachel voice generated successfully")
+    console.log("✅ Rachel voice generated successfully with dynamic variation")
+    console.log(`🎭 Voice style: ${selectedVariationKey} (${selectedVariation.description})`)
     console.log(`📊 ${wordTimings.length} words timed over ${totalDuration.toFixed(1)}s`)
 
     return {
@@ -186,6 +236,7 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
       alignmentUsed: false, // Using fallback timing
       originalScript: script,
       sanitizedScript: cleanScript,
+      voiceVariation: `${selectedVariationKey} (${selectedVariation.description})`,
     }
   } catch (error) {
     console.error("❌ Rachel voice generation failed:", error)
@@ -198,28 +249,29 @@ async function generateRachelVoiceWithWordTimestamps(script: string): Promise<{
   }
 }
 
-// Generate fallback word timings that sync with actual audio playback
-function generateFallbackWordTimings(words: string[], audioStartDelay = 0.5): WordTiming[] {
+// Generate fallback word timings with DYNAMIC PACING based on voice variation
+function generateFallbackWordTimings(words: string[], audioStartDelay = 0.5, speakingRate = 0.85): WordTiming[] {
   const wordTimings: WordTiming[] = []
   let currentTime = audioStartDelay // Wait for audio to actually start
 
-  // More realistic speech timing for Rachel voice at 0.85x speed
-  const baseWordsPerSecond = 2.2 * 0.85 // Adjusted for slower speech
+  // DYNAMIC speech timing based on speaking rate
+  const baseWordsPerSecond = 2.2 * speakingRate // Adjusted for voice variation
 
   words.forEach((word, index) => {
-    let wordDuration = 0.45 // Base duration per word
+    let wordDuration = 0.45 / speakingRate // Base duration adjusted for speaking rate
 
     // Adjust for word characteristics
-    if (word.length > 6) wordDuration += 0.15
-    if (word.length > 10) wordDuration += 0.25
+    if (word.length > 6) wordDuration += 0.15 / speakingRate
+    if (word.length > 10) wordDuration += 0.25 / speakingRate
 
-    // Punctuation adds natural pauses
-    if (word.includes(",")) wordDuration += 0.15
-    if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4
+    // Punctuation adds natural pauses (less pause for faster speech)
+    if (word.includes(",")) wordDuration += 0.15 / speakingRate
+    if (word.includes(".") || word.includes("!") || word.includes("?")) wordDuration += 0.4 / speakingRate
 
     // Numbers and property terms need more time
-    if (/\d/.test(word)) wordDuration += 0.2
-    if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom")) wordDuration += 0.15
+    if (/\d/.test(word)) wordDuration += 0.2 / speakingRate
+    if (word.toLowerCase().includes("bedroom") || word.toLowerCase().includes("bathroom"))
+      wordDuration += 0.15 / speakingRate
 
     wordTimings.push({
       word: word,
@@ -227,17 +279,17 @@ function generateFallbackWordTimings(words: string[], audioStartDelay = 0.5): Wo
       endTime: currentTime + wordDuration,
     })
 
-    currentTime += wordDuration + 0.08 // Natural gap between words
+    currentTime += wordDuration + 0.08 / speakingRate // Natural gap between words adjusted for rate
   })
 
   return wordTimings
 }
 
-// Estimate total duration for 0.85x speed
-function estimateDuration(script: string): number {
+// Estimate total duration with DYNAMIC SPEAKING RATE
+function estimateDuration(script: string, speakingRate = 0.85): number {
   const wordCount = script.split(/\s+/).length
-  // Adjust for 0.85x speed (slower = longer duration)
-  return Math.max(35, (wordCount / (150 * 0.85)) * 60)
+  // Adjust for dynamic speaking rate
+  return Math.max(35, (wordCount / (150 * speakingRate)) * 60)
 }
 
 // Generate captions that sync with actual audio timing
@@ -330,7 +382,7 @@ function generateSentenceCaptions(
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 COMPLETE VIDEO GENERATION WITH SANITIZED SCRIPT")
+    console.log("🎬 COMPLETE VIDEO GENERATION WITH DYNAMIC VOICE VARIATIONS")
 
     const data: VideoRequest = await request.json()
 
@@ -343,8 +395,8 @@ export async function POST(request: NextRequest) {
     console.log(`🖼️ Images: ${data.imageUrls.length}`)
     console.log(`📝 Script: ${data.script.length} chars`)
 
-    // Step 1: Generate Rachel voice with sanitized script and word timestamps
-    const audioResult = await generateRachelVoiceWithWordTimestamps(data.script)
+    // Step 1: Generate Rachel voice with DYNAMIC VOICE VARIATION and word timestamps
+    const audioResult = await generateRachelVoiceWithWordTimestamps(data.script, data.address)
     if (!audioResult.success) {
       return NextResponse.json({ error: `Voice generation failed: ${audioResult.error}` }, { status: 500 })
     }
@@ -366,7 +418,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`📊 Video: ${totalDuration.toFixed(1)}s duration, ${timePerImage}s per image`)
     console.log(
-      `🎤 Rachel voice: 0.85x speed, sanitized script, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
+      `🎤 Rachel voice: ${audioResult.voiceVariation || "standard variation"}, word timestamps: ${audioResult.alignmentUsed ? "Yes" : "No"}`,
     )
     console.log(`📝 Captions: ${captions.length} chunks with precise timing`)
 
@@ -387,16 +439,16 @@ export async function POST(request: NextRequest) {
         sqft: data.sqft,
       },
       format: {
-        width: 576,
-        height: 1024,
+        width: 1080,
+        height: 1920,
         fps: 30,
       },
       voiceSettings: {
-        speed: 0.85,
+        variation: audioResult.voiceVariation || "standard",
         natural: true,
         wordSynced: audioResult.alignmentUsed || false,
         alignmentUsed: audioResult.alignmentUsed || false,
-        description: `Rachel voice at 0.85x speed${audioResult.alignmentUsed ? " with precise word timestamps" : " with estimated timing"}`,
+        description: `Rachel voice with ${audioResult.voiceVariation || "standard variation"}${audioResult.alignmentUsed ? " and precise word timestamps" : " and estimated timing"}`,
       },
       metadata: {
         alignmentUsed: audioResult.alignmentUsed || false,
@@ -405,6 +457,7 @@ export async function POST(request: NextRequest) {
         scriptSanitized: true,
         originalScriptLength: data.script.length,
         sanitizedScriptLength: audioResult.sanitizedScript?.length || 0,
+        voiceVariation: audioResult.voiceVariation || "standard",
       },
     })
   } catch (error) {
