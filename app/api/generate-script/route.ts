@@ -196,19 +196,32 @@ function contextAwareAbbreviationFix(text: string, address: string): string {
 
   // Fix decimal bathrooms - IMPROVED NATURAL SPEECH
   fixed = fixed
-    .replace(/2\.5\s+bathrooms/gi, "two and a half bathrooms")
-    .replace(/1\.5\s+bathrooms/gi, "one and a half bathrooms")
-    .replace(/3\.5\s+bathrooms/gi, "three and a half bathrooms")
-    .replace(/4\.5\s+bathrooms/gi, "four and a half bathrooms")
-    .replace(/5\.5\s+bathrooms/gi, "five and a half bathrooms")
-    // Handle singular forms too
-    .replace(/2\.5\s+bathroom/gi, "two and a half bathrooms")
-    .replace(/1\.5\s+bathroom/gi, "one and a half bathrooms")
-    .replace(/3\.5\s+bathroom/gi, "three and a half bathrooms")
-    // Handle "bath" abbreviations that might slip through
-    .replace(/2\.5\s+bath/gi, "two and a half bathrooms")
-    .replace(/1\.5\s+bath/gi, "one and a half bathrooms")
-    .replace(/3\.5\s+bath/gi, "three and a half bathrooms")
+    .replace(/(\d+)\.(\d+)\s+bathrooms/gi, (match, whole, decimal) => {
+      if (decimal === "5") return `${whole} and a half bathrooms`
+      return match // Keep other decimals as-is for now
+    })
+    .replace(/(\d+)\.(\d+)\s+bathroom/gi, (match, whole, decimal) => {
+      if (decimal === "5") return `${whole} and a half bathrooms`
+      return match
+    })
+    // Handle the specific "1. Five" error pattern
+    .replace(/1\.\s*Five\s+bathrooms/gi, "one and a half bathrooms")
+    .replace(/2\.\s*Five\s+bathrooms/gi, "two and a half bathrooms")
+    .replace(/3\.\s*Five\s+bathrooms/gi, "three and a half bathrooms")
+
+  // Fix quote marks and punctuation
+  fixed = fixed
+    .replace(/Don"t/gi, "Do not")
+    .replace(/can"t/gi, "cannot")
+    .replace(/won"t/gi, "will not")
+    .replace(/isn"t/gi, "is not")
+    .replace(/aren"t/gi, "are not")
+    .replace(/doesn"t/gi, "does not")
+    .replace(/didn"t/gi, "did not")
+    .replace(/shouldn"t/gi, "should not")
+    .replace(/wouldn"t/gi, "would not")
+    .replace(/couldn"t/gi, "could not")
+    .replace(/"/g, "") // Remove any remaining quote marks
 
   // Fix grammar issues
   fixed = fixed
@@ -219,6 +232,13 @@ function contextAwareAbbreviationFix(text: string, address: string): string {
 
   // Capitalize first letter of sentences
   fixed = fixed.replace(/(^|[.!?]\s+)([a-z])/g, (match, p1, p2) => p1 + p2.toUpperCase())
+
+  // Final cleanup for common errors
+  fixed = fixed
+    .replace(/\s+/g, " ") // Normalize all whitespace
+    .replace(/\.\s*([a-z])/g, ". $1") // Fix spacing after periods
+    .replace(/([.!?])\s*([A-Z])/g, "$1 $2") // Ensure proper sentence spacing
+    .trim()
 
   // Final cleanup
   fixed = fixed.trim()

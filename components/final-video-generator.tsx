@@ -289,13 +289,17 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         setIsGenerating(false)
       }
 
-      // Start recording and audio
+      // Start recording and audio with better timing
       setCurrentStep("Recording final video with Rachel voiceover...")
       setProgress(55)
 
       mediaRecorder.start(100)
-      audioElement.currentTime = 0
-      await audioElement.play()
+
+      // Add small delay before starting audio to ensure video recording is ready
+      setTimeout(async () => {
+        audioElement.currentTime = 0
+        await audioElement.play()
+      }, 100)
 
       // Animation loop with captions
       const startTime = Date.now()
@@ -315,13 +319,29 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         // Calculate current image
         const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-        // Find current caption
+        // Find current caption with better timing logic
         const currentCaptionChunk = config.captions.find(
-          (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds < caption.endTime,
+          (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
         )
 
-        if (currentCaptionChunk) {
+        // If no exact match, find the closest caption
+        if (!currentCaptionChunk && config.captions.length > 0) {
+          const closestCaption = config.captions.reduce((closest, caption) => {
+            const currentDistance = Math.abs(elapsedSeconds - caption.startTime)
+            const closestDistance = Math.abs(elapsedSeconds - closest.startTime)
+            return currentDistance < closestDistance ? caption : closest
+          })
+
+          // Only use closest if we're within 1 second
+          if (Math.abs(elapsedSeconds - closestCaption.startTime) <= 1.0) {
+            setCurrentCaption(closestCaption.text)
+          } else {
+            setCurrentCaption("")
+          }
+        } else if (currentCaptionChunk) {
           setCurrentCaption(currentCaptionChunk.text)
+        } else {
+          setCurrentCaption("")
         }
 
         // Draw current image
