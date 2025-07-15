@@ -154,7 +154,7 @@ function adjustScriptForDuration(script: string, targetDuration: number, speakin
   return script
 }
 
-// FIXED: Generate ElevenLabs Rachel voiceover with proper response handling
+// FIXED: Generate ElevenLabs Rachel voiceover with WAV format for better compatibility
 async function generateRachelVoiceWithWordTimestamps(
   script: string,
   address: string,
@@ -171,7 +171,7 @@ async function generateRachelVoiceWithWordTimestamps(
   voiceVariation?: string
 }> {
   try {
-    console.log("🎤 Generating Rachel voiceover with FIXED response handling...")
+    console.log("🎤 Generating Rachel voiceover with WAV format for better codec compatibility...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       throw new Error("ElevenLabs API key not configured")
@@ -211,7 +211,7 @@ async function generateRachelVoiceWithWordTimestamps(
       throw new Error("Script too long for ElevenLabs (max 5000 characters after sanitization)")
     }
 
-    // Step 5: FIXED - Request audio only (no timestamps) for reliable audio generation
+    // Step 5: FIXED - Use WAV format for better browser compatibility
     const requestPayload = {
       text: cleanScript,
       model_id: "eleven_monolingual_v1",
@@ -222,21 +222,21 @@ async function generateRachelVoiceWithWordTimestamps(
         use_speaker_boost: true,
         speaking_rate: selectedVariation.speaking_rate,
       },
-      output_format: "mp3_44100_128",
+      output_format: "pcm_44100", // WAV format for better compatibility
       enable_logging: false,
-      // REMOVED: timestamps: "word" - This was causing JSON response instead of audio
     }
 
     console.log(`📦 ElevenLabs payload prepared with ${selectedVariationKey} voice variation`)
     console.log("🎛️ Voice settings:", requestPayload.voice_settings)
+    console.log("🎵 Audio format: WAV (PCM 44.1kHz) for better codec compatibility")
 
-    // Step 6: Make API request for AUDIO ONLY
-    console.log("📡 Making ElevenLabs API request for audio generation...")
+    // Step 6: Make API request for WAV audio
+    console.log("📡 Making ElevenLabs API request for WAV audio generation...")
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM`, {
       method: "POST",
       headers: {
-        Accept: "audio/mpeg", // Request audio directly
+        Accept: "audio/wav", // Request WAV audio
         "Content-Type": "application/json",
         "xi-api-key": apiKey,
       },
@@ -261,28 +261,29 @@ async function generateRachelVoiceWithWordTimestamps(
       throw new Error(errorMessage)
     }
 
-    // Step 7: FIXED - Handle audio response properly
+    // Step 7: FIXED - Handle WAV audio response properly
     const audioBlob = await response.blob()
-    console.log(`🎵 Audio blob received: ${audioBlob.size} bytes, type: ${audioBlob.type}`)
+    console.log(`🎵 WAV audio blob received: ${audioBlob.size} bytes, type: ${audioBlob.type}`)
 
     if (audioBlob.size === 0) {
       throw new Error("ElevenLabs returned empty audio")
     }
 
-    // Convert to data URL for immediate use
+    // Convert WAV to data URL for immediate use
     const arrayBuffer = await audioBlob.arrayBuffer()
     const base64Audio = Buffer.from(arrayBuffer).toString("base64")
-    const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`
+    const audioDataUrl = `data:audio/wav;base64,${base64Audio}`
 
     // Step 8: Generate fallback word timings with DURATION MATCHING
     console.log("⚠️ Using fallback word timing generation with duration matching")
     const words = adjustedScript.split(/\s+/).filter((w) => w.length > 0)
     const wordTimings = generateFallbackWordTimings(words, 0.5, selectedVariation.speaking_rate, targetDuration)
 
-    console.log("✅ Rachel voice generated successfully with FIXED audio handling")
+    console.log("✅ Rachel voice generated successfully with WAV format for better compatibility")
     console.log(`🎭 Voice style: ${selectedVariationKey} (${selectedVariation.description})`)
     console.log(`📊 ${wordTimings.length} words timed over ${targetDuration.toFixed(1)}s`)
     console.log(`🎵 Audio data URL length: ${audioDataUrl.length} characters`)
+    console.log(`🔧 Audio format: WAV for maximum browser compatibility`)
 
     return {
       success: true,
@@ -462,7 +463,7 @@ function generateSentenceCaptions(
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("🎬 COMPLETE VIDEO GENERATION WITH FIXED AUDIO HANDLING")
+    console.log("🎬 COMPLETE VIDEO GENERATION WITH WAV AUDIO FOR BETTER CODEC COMPATIBILITY")
 
     const data: VideoRequest = await request.json()
 
@@ -483,7 +484,7 @@ export async function POST(request: NextRequest) {
     // Step 1: Calculate video duration based on photo count (supports up to 30 photos)
     const videoDuration = calculateVideoDurationFromPhotos(data.imageUrls.length)
 
-    // Step 2: Generate Rachel voice with FIXED audio handling
+    // Step 2: Generate Rachel voice with WAV format for better compatibility
     const audioResult = await generateRachelVoiceWithWordTimestamps(
       data.script,
       data.address,
@@ -510,9 +511,7 @@ export async function POST(request: NextRequest) {
       `📊 Video: ${videoDuration.totalDuration.toFixed(1)}s duration based on ${videoDuration.actualPhotoCount} photos`,
     )
     console.log(`📸 Photo timing: ${videoDuration.timePerPhoto.toFixed(2)}s per photo`)
-    console.log(
-      `🎤 Rachel voice: ${audioResult.voiceVariation || "standard variation"}, audio generated: ${audioResult.success ? "YES" : "NO"}`,
-    )
+    console.log(`🎤 Rachel voice: ${audioResult.voiceVariation || "standard variation"}, WAV format for compatibility`)
     console.log(`📝 Captions: ${captions.length} chunks with precise timing`)
 
     // Return everything needed for client-side video generation
@@ -541,7 +540,7 @@ export async function POST(request: NextRequest) {
         natural: true,
         wordSynced: audioResult.alignmentUsed || false,
         alignmentUsed: audioResult.alignmentUsed || false,
-        description: `Rachel voice with ${audioResult.voiceVariation || "standard variation"}${audioResult.alignmentUsed ? " and precise word timestamps" : " and estimated timing"}`,
+        description: `Rachel voice with ${audioResult.voiceVariation || "standard variation"} in WAV format for better compatibility`,
       },
       videoDuration: {
         total: videoDuration.totalDuration,
@@ -565,6 +564,7 @@ export async function POST(request: NextRequest) {
         photosReceived: data.imageUrls.length,
         audioGenerated: audioResult.success,
         audioError: audioResult.error || null,
+        audioFormat: "WAV (PCM 44.1kHz) for maximum browser compatibility",
       },
     })
   } catch (error) {

@@ -68,13 +68,13 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         audio.oncanplaythrough = () => {
           setAudioReady(true)
           setAudioTested(true)
-          console.log("✅ Rachel audio loaded successfully")
+          console.log("✅ Rachel WAV audio loaded successfully")
           resolve(null)
         }
         audio.onerror = (e) => {
           setAudioReady(false)
           setAudioTested(true)
-          console.error("❌ Rachel audio loading failed:", e)
+          console.error("❌ Rachel WAV audio loading failed:", e)
           reject(new Error("Audio loading failed"))
         }
         audio.load()
@@ -151,7 +151,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
     }
 
     if (!audioReady) {
-      onError("Rachel audio failed to load. Please try again.")
+      onError("Rachel WAV audio failed to load. Please try again.")
       return
     }
 
@@ -186,14 +186,14 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
       }
 
       // Setup audio
-      setCurrentStep("Setting up Rachel voiceover...")
+      setCurrentStep("Setting up Rachel WAV voiceover...")
       setProgress(35)
 
       const audioElement = audioRef.current!
       audioElement.src = config.audioUrl
 
-      // Setup recording with audio
-      setCurrentStep("Setting up video recording with audio...")
+      // Setup recording with audio - IMPROVED FOR WAV COMPATIBILITY
+      setCurrentStep("Setting up video recording with WAV audio...")
       setProgress(45)
 
       let stream: MediaStream
@@ -203,37 +203,53 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         // Create canvas stream
         stream = canvas.captureStream(config.format.fps)
 
-        // Add audio track using Web Audio API
-        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        // IMPROVED: Better audio context setup for WAV compatibility
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 44100, // Match WAV sample rate
+        })
+
+        // Wait for audio context to be ready
+        if (audioContext.state === "suspended") {
+          await audioContext.resume()
+        }
+
         const audioSource = audioContext.createMediaElementSource(audioElement)
         const audioDestination = audioContext.createMediaStreamDestination()
 
-        // Connect audio
-        audioSource.connect(audioDestination)
-        audioSource.connect(audioContext.destination) // Also play through speakers
+        // Connect audio with gain control for better quality
+        const gainNode = audioContext.createGain()
+        gainNode.gain.value = 1.0 // Full volume
+
+        audioSource.connect(gainNode)
+        gainNode.connect(audioDestination)
+        gainNode.connect(audioContext.destination) // Also play through speakers
 
         const audioTrack = audioDestination.stream.getAudioTracks()[0]
         if (audioTrack) {
           stream.addTrack(audioTrack)
-          console.log("✅ Rachel audio track added to video stream")
+          console.log("✅ Rachel WAV audio track added to video stream with gain control")
         }
       } catch (audioError) {
         console.warn("Audio setup failed:", audioError)
         stream = canvas.captureStream(config.format.fps)
       }
 
-      // Setup MediaRecorder with best quality
+      // IMPROVED: Better MediaRecorder setup for WAV audio compatibility
       const supportedTypes = [
-        "video/webm;codecs=vp9,opus",
-        "video/webm;codecs=vp8,opus",
-        "video/webm;codecs=vp9",
-        "video/webm",
+        "video/webm;codecs=vp9,opus", // Best quality with Opus audio
+        "video/webm;codecs=vp8,opus", // Fallback with Opus
+        "video/webm;codecs=vp9,pcm", // WAV-compatible
+        "video/webm;codecs=vp8,pcm", // WAV-compatible fallback
+        "video/webm;codecs=vp9", // Video only fallback
+        "video/webm;codecs=vp8", // Video only fallback
+        "video/webm", // Basic fallback
       ]
 
       let selectedType = "video/webm"
       for (const type of supportedTypes) {
         if (MediaRecorder.isTypeSupported(type)) {
           selectedType = type
+          console.log(`🎵 Selected MediaRecorder type: ${type}`)
           break
         }
       }
@@ -241,7 +257,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: selectedType,
         videoBitsPerSecond: 4000000, // Higher quality
-        audioBitsPerSecond: 128000,
+        audioBitsPerSecond: 128000, // High quality audio
       })
 
       mediaRecorderRef.current = mediaRecorder
@@ -250,6 +266,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           chunks.push(event.data)
+          console.log(`📦 Video chunk received: ${event.data.size} bytes`)
         }
       }
 
@@ -267,15 +284,17 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
             throw new Error("No video data recorded")
           }
 
-          setCurrentStep("Creating final video file...")
+          setCurrentStep("Creating final video file with WAV audio...")
           setProgress(95)
 
           const videoBlob = new Blob(chunks, { type: selectedType })
+          console.log(`🎬 Final video blob: ${videoBlob.size} bytes, type: ${selectedType}`)
+
           const videoUrl = URL.createObjectURL(videoBlob)
 
           setVideoUrl(videoUrl)
           onVideoGenerated(videoUrl)
-          setCurrentStep("Final video with Rachel voice generated!")
+          setCurrentStep("Final video with Rachel WAV voice generated!")
           setProgress(100)
         } catch (error) {
           onError(error instanceof Error ? error.message : "Video creation failed")
@@ -284,22 +303,28 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         }
       }
 
-      mediaRecorder.onerror = () => {
+      mediaRecorder.onerror = (event) => {
+        console.error("MediaRecorder error:", event)
         onError("Video recording failed")
         setIsGenerating(false)
       }
 
       // Start recording and audio with better timing
-      setCurrentStep("Recording final video with Rachel voiceover...")
+      setCurrentStep("Recording final video with Rachel WAV voiceover...")
       setProgress(55)
 
-      mediaRecorder.start(100)
+      mediaRecorder.start(100) // Record in 100ms chunks
 
-      // Add small delay before starting audio to ensure video recording is ready
+      // IMPROVED: Better audio sync timing
       setTimeout(async () => {
-        audioElement.currentTime = 0
-        await audioElement.play()
-      }, 100)
+        try {
+          audioElement.currentTime = 0
+          await audioElement.play()
+          console.log("🎵 Rachel WAV audio playback started")
+        } catch (audioPlayError) {
+          console.error("Audio playback failed:", audioPlayError)
+        }
+      }, 200) // Slightly longer delay for better sync
 
       // Animation loop with captions
       const startTime = Date.now()
@@ -319,12 +344,12 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
         // Calculate current image
         const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-        // Find current caption with better timing logic
+        // IMPROVED: Better caption timing logic
         const currentCaptionChunk = config.captions.find(
           (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
         )
 
-        // If no exact match, find the closest caption
+        // If no exact match, find the closest caption within reasonable range
         if (!currentCaptionChunk && config.captions.length > 0) {
           const closestCaption = config.captions.reduce((closest, caption) => {
             const currentDistance = Math.abs(elapsedSeconds - caption.startTime)
@@ -332,8 +357,8 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
             return currentDistance < closestDistance ? caption : closest
           })
 
-          // Only use closest if we're within 1 second
-          if (Math.abs(elapsedSeconds - closestCaption.startTime) <= 1.0) {
+          // Only use closest if we're within 1.5 seconds (more forgiving)
+          if (Math.abs(elapsedSeconds - closestCaption.startTime) <= 1.5) {
             setCurrentCaption(closestCaption.text)
           } else {
             setCurrentCaption("")
@@ -392,11 +417,11 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
             70,
           )
 
-          // Rachel voice indicator
+          // Rachel voice indicator with WAV format
           ctx.fillStyle = "#FF69B4"
           ctx.font = "bold 12px Arial"
           ctx.textAlign = "right"
-          ctx.fillText("🎤 Rachel Voice", canvas.width - 20, 85)
+          ctx.fillText("🎤 Rachel Voice (WAV)", canvas.width - 20, 85)
         }
 
         // Update progress
@@ -452,19 +477,20 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
           <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-6">
             <div className="flex items-center gap-2 mb-3">
               <Volume2 className="h-6 w-6 text-purple-600" />
-              <span className="font-bold text-purple-700 text-lg">Rachel Voice Ready!</span>
+              <span className="font-bold text-purple-700 text-lg">Rachel Voice Ready! (WAV Format)</span>
             </div>
             <div className="text-sm text-purple-600 space-y-2">
-              <p>✅ Rachel (ElevenLabs) voiceover loaded</p>
+              <p>✅ Rachel (ElevenLabs) WAV voiceover loaded</p>
               <p>✅ {config.images.length} property images ready</p>
               <p>✅ {config.captions.length} TikTok-style captions prepared</p>
               <p>✅ {config.duration}s duration with perfect sync</p>
+              <p>🔧 WAV format for maximum browser compatibility</p>
               {audioReady ? (
-                <p className="text-green-600 font-medium">🎵 Audio tested and ready!</p>
+                <p className="text-green-600 font-medium">🎵 WAV audio tested and ready!</p>
               ) : audioTested ? (
-                <p className="text-red-600 font-medium">⚠️ Audio test failed</p>
+                <p className="text-red-600 font-medium">⚠️ WAV audio test failed</p>
               ) : (
-                <p className="text-yellow-600 font-medium">🔄 Testing audio...</p>
+                <p className="text-yellow-600 font-medium">🔄 Testing WAV audio...</p>
               )}
             </div>
           </div>
@@ -475,7 +501,7 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
             className="w-full h-14 text-lg font-bold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
           >
             <Play className="mr-3 h-6 w-6" />
-            Generate Final Video with Rachel
+            Generate Final Video with Rachel (WAV)
           </Button>
         </div>
       )}
@@ -493,13 +519,13 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
           {currentCaption && (
             <div className="bg-black text-white p-4 rounded-lg text-center border-2 border-purple-500">
               <p className="font-bold text-lg">{currentCaption}</p>
-              <p className="text-xs text-gray-300 mt-1">Live Caption Preview</p>
+              <p className="text-xs text-gray-300 mt-1">Live Caption Preview (WAV Synced)</p>
             </div>
           )}
 
           <Alert>
             <Loader2 className="h-4 w-4 animate-spin" />
-            <AlertDescription>Generating final video with Rachel voiceover and TikTok captions...</AlertDescription>
+            <AlertDescription>Generating final video with Rachel WAV voiceover and TikTok captions...</AlertDescription>
           </Alert>
 
           <Button onClick={stopGeneration} variant="destructive" className="w-full">
@@ -513,12 +539,13 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
           <div className="bg-green-50 border border-green-200 rounded-lg p-6">
             <div className="flex items-center gap-2 text-green-700 mb-3">
               <CheckCircle className="h-6 w-6" />
-              <span className="font-bold text-lg">Final Video Generated!</span>
+              <span className="font-bold text-lg">Final Video Generated with WAV Audio!</span>
             </div>
             <div className="text-sm text-green-600 space-y-1">
               <p>✅ ALL {config.images.length} images included</p>
-              <p>✅ Rachel voiceover perfectly synced</p>
+              <p>✅ Rachel WAV voiceover perfectly synced</p>
               <p>✅ {config.captions.length} TikTok-style captions</p>
+              <p>✅ WAV format for maximum compatibility</p>
               <p>✅ Ready for TikTok, Instagram, YouTube</p>
             </div>
           </div>
@@ -532,9 +559,9 @@ export function FinalVideoGenerator({ config, property, onVideoGenerated, onErro
               asChild
               className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
             >
-              <a href={videoUrl} download="final-property-video-rachel.webm">
+              <a href={videoUrl} download="final-property-video-rachel-wav.webm">
                 <Download className="mr-2 h-4 w-4" />
-                Download Final Video
+                Download Final Video (WAV Audio)
               </a>
             </Button>
           </div>
