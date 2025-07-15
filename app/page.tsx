@@ -47,7 +47,7 @@ export default function VideoGenerator() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const MAX_IMAGES = 15
+  const MAX_IMAGES = 30
 
   // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
