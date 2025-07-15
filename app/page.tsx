@@ -514,12 +514,12 @@ export default function VideoGenerator() {
               {isLoading ? (
                 <>
                   <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                  Generating Final Video...
+                  Generating Video...
                 </>
               ) : (
                 <>
                   <Sparkles className="mr-3 h-6 w-6" />
-                  Generate Final Video
+                  Generate Video
                 </>
               )}
             </Button>

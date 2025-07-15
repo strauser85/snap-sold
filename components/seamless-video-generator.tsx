@@ -313,78 +313,39 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
   // SMART CAPTION RENDERING WITH AUTO-SCALING
   const calculateCaptionRenderInfo = useCallback(
     (ctx: CanvasRenderingContext2D, text: string, canvas: HTMLCanvasElement, priority: number): CaptionRenderInfo => {
-      // Ensure text is uppercase for consistent measurement
       const displayText = text.toUpperCase()
+      const maxWidth = canvas.width * 0.9
+      const bottomPadding = canvas.height * 0.1
 
-      const maxWidth = canvas.width * 0.9 // 90% of video width
-      const bottomPadding = canvas.height * 0.1 // 10% padding from bottom for consistent placement
+      // FIXED FONT SIZE - NO PRIORITY OR LENGTH ADJUSTMENTS
+      const fontSize = Math.floor(canvas.width * 0.08)
 
-      // Consistent base font size calculation
-      let baseFontSize = Math.floor(canvas.width * 0.08) // Slightly smaller base for consistency
-
-      // Priority-based sizing adjustments
-      if (priority >= 5) baseFontSize = Math.floor(canvas.width * 0.095) // High priority slightly larger
-      if (priority <= 2) baseFontSize = Math.floor(canvas.width * 0.07) // Low priority slightly smaller
-
-      // Length-based adjustments
-      if (displayText.length > 30) baseFontSize = Math.floor(canvas.width * 0.065)
-      if (displayText.length > 45) baseFontSize = Math.floor(canvas.width * 0.055)
-
-      let fontSize = baseFontSize
-      let autoScaled = false
-
-      // Test if text fits at base size
       ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
-      let textWidth = ctx.measureText(displayText).width
 
-      // Auto-scale down if too wide
-      while (textWidth > maxWidth && fontSize > canvas.width * 0.04) {
-        fontSize -= 2
-        ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
-        textWidth = ctx.measureText(displayText).width
-        autoScaled = true
-      }
-
-      // Smart line breaking
+      // Simple line breaking
       const words = displayText.split(" ")
       const lines: string[] = []
+      let currentLine = ""
 
-      if (textWidth <= maxWidth) {
-        // Single line fits
-        lines.push(displayText)
-      } else {
-        // Multi-line breaking
-        let currentLine = ""
+      for (const word of words) {
+        const testLine = currentLine + (currentLine ? " " : "") + word
+        const testWidth = ctx.measureText(testLine).width
 
-        for (const word of words) {
-          const testLine = currentLine + (currentLine ? " " : "") + word
-          const testWidth = ctx.measureText(testLine).width
-
-          if (testWidth <= maxWidth) {
-            currentLine = testLine
+        if (testWidth <= maxWidth) {
+          currentLine = testLine
+        } else {
+          if (currentLine) {
+            lines.push(currentLine)
+            currentLine = word
           } else {
-            if (currentLine) {
-              lines.push(currentLine)
-              currentLine = word
-            } else {
-              // Single word too long, force it
-              lines.push(word)
-            }
+            lines.push(word)
           }
         }
-
-        if (currentLine) {
-          lines.push(currentLine)
-        }
-
-        // Avoid single words on their own line (except if stylistic)
-        if (lines.length > 1 && lines[lines.length - 1].split(" ").length === 1 && lines.length > 2) {
-          const lastWord = lines.pop()!
-          lines[lines.length - 1] += " " + lastWord
-        }
+      }
+      if (currentLine) {
+        lines.push(currentLine)
       }
 
-      // Consistent positioning calculation
       const lineHeight = fontSize * 1.3
       const totalTextHeight = lines.length * lineHeight
       const startY = canvas.height - bottomPadding - totalTextHeight + lineHeight * 0.8
@@ -392,9 +353,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
       return {
         fontSize,
         lines,
-        x: canvas.width / 2, // Always center horizontally
+        x: canvas.width / 2,
         y: startY,
-        autoScaled,
+        autoScaled: false,
         maxWidth,
       }
     },
@@ -403,9 +364,9 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
   const drawHighlightCaption = useCallback(
     (ctx: CanvasRenderingContext2D, caption: HighlightCaption, canvas: HTMLCanvasElement, currentTime: number) => {
-      const { text, startTime, endTime, priority } = caption
+      const { text, startTime, endTime } = caption
 
-      // Ensure text is always uppercase
+      // FORCE ALL TEXT TO UPPERCASE - NO EXCEPTIONS
       const displayText = text.toUpperCase()
 
       // Calculate opacity with fade in/out
@@ -419,58 +380,80 @@ export function SeamlessVideoGenerator({ propertyData, onVideoGenerated, onError
 
       if (opacity <= 0) return
 
-      // Get smart rendering info
-      const renderInfo = calculateCaptionRenderInfo(ctx, displayText, canvas, priority)
+      // STANDARDIZED FONT SIZE - SAME FOR ALL CAPTIONS
+      const fontSize = Math.floor(canvas.width * 0.08) // Fixed size, no priority adjustments
 
-      // Set consistent font styling
-      ctx.font = `900 ${renderInfo.fontSize}px "Arial Black", Arial, sans-serif`
+      // STANDARDIZED FONT - SAME FOR ALL CAPTIONS
+      ctx.font = `900 ${fontSize}px "Arial Black", Arial, sans-serif`
       ctx.textAlign = "center"
 
-      // Draw each line with consistent styling
-      renderInfo.lines.forEach((line, lineIndex) => {
-        const y = renderInfo.y + lineIndex * (renderInfo.fontSize * 1.3)
+      // Smart line breaking with consistent max width
+      const maxWidth = canvas.width * 0.9
+      const words = displayText.split(" ")
+      const lines: string[] = []
 
-        // Ensure line is uppercase
-        const displayLine = line.toUpperCase()
+      let currentLine = ""
+      for (const word of words) {
+        const testLine = currentLine + (currentLine ? " " : "") + word
+        const testWidth = ctx.measureText(testLine).width
 
-        // Background box for readability
-        const textMetrics = ctx.measureText(displayLine)
+        if (testWidth <= maxWidth) {
+          currentLine = testLine
+        } else {
+          if (currentLine) {
+            lines.push(currentLine)
+            currentLine = word
+          } else {
+            lines.push(word)
+          }
+        }
+      }
+      if (currentLine) {
+        lines.push(currentLine)
+      }
+
+      // STANDARDIZED POSITIONING - SAME FOR ALL CAPTIONS
+      const lineHeight = fontSize * 1.3
+      const bottomPadding = canvas.height * 0.1
+      const totalTextHeight = lines.length * lineHeight
+      const startY = canvas.height - bottomPadding - totalTextHeight + lineHeight * 0.8
+
+      // Draw each line with IDENTICAL styling
+      lines.forEach((line, lineIndex) => {
+        const y = startY + lineIndex * lineHeight
+
+        // STANDARDIZED BACKGROUND BOX
+        const textMetrics = ctx.measureText(line)
         const textWidth = textMetrics.width
-        const padding = renderInfo.fontSize * 0.6
+        const padding = fontSize * 0.6
         const boxWidth = textWidth + padding * 2
-        const boxHeight = renderInfo.fontSize + padding
+        const boxHeight = fontSize + padding
         const boxX = (canvas.width - boxWidth) / 2
-        const boxY = y - renderInfo.fontSize * 0.9
+        const boxY = y - fontSize * 0.9
 
-        // Consistent semi-transparent black background
+        // IDENTICAL BLACK BACKGROUND FOR ALL
         ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * opacity})`
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight)
 
-        // Primary black stroke for depth
+        // IDENTICAL BLACK STROKE FOR ALL
         ctx.strokeStyle = `rgba(0, 0, 0, ${opacity})`
-        ctx.lineWidth = Math.floor(renderInfo.fontSize * 0.2)
-        ctx.strokeText(displayLine, renderInfo.x, y)
+        ctx.lineWidth = Math.floor(fontSize * 0.2)
+        ctx.strokeText(line, canvas.width / 2, y)
 
-        // Secondary shadow stroke
+        // IDENTICAL SHADOW STROKE FOR ALL
         ctx.strokeStyle = `rgba(0, 0, 0, ${0.7 * opacity})`
-        ctx.lineWidth = Math.floor(renderInfo.fontSize * 0.1)
-        ctx.strokeText(displayLine, renderInfo.x + 3, y + 3)
+        ctx.lineWidth = Math.floor(fontSize * 0.1)
+        ctx.strokeText(line, canvas.width / 2 + 3, y + 3)
 
-        // CONSISTENT BRIGHT YELLOW TEXT - This is the main text color
+        // IDENTICAL BRIGHT YELLOW TEXT FOR ALL - NO VARIATIONS
         ctx.fillStyle = `rgba(255, 255, 0, ${opacity})`
-        ctx.fillText(displayLine, renderInfo.x, y)
+        ctx.fillText(line, canvas.width / 2, y)
 
-        // High priority glow effect (optional enhancement)
-        if (priority >= 4) {
-          ctx.shadowColor = `rgba(255, 255, 0, ${0.3 * opacity})`
-          ctx.shadowBlur = 8
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.6 * opacity})`
-          ctx.fillText(displayLine, renderInfo.x, y)
-          ctx.shadowBlur = 0
-        }
+        // Reset any shadow effects
+        ctx.shadowBlur = 0
       })
     },
-    [calculateCaptionRenderInfo],
+    [],
   )
 
   const generateAudio = useCallback(
