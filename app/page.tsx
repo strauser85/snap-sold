@@ -4,7 +4,7 @@ import { useState, type ChangeEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Loader2,
@@ -18,7 +18,6 @@ import {
   Upload,
   Sparkles,
   RefreshCw,
-  Video,
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import { SeamlessVideoGenerator } from "@/components/seamless-video-generator"
@@ -33,8 +32,6 @@ interface UploadedImage {
 }
 
 export default function VideoGenerator() {
-  const [currentStep, setCurrentStep] = useState<"upload" | "generate" | "video">("upload")
-  const [propertyData, setPropertyData] = useState<any>(null)
   const [address, setAddress] = useState("")
   const [price, setPrice] = useState<number | string>("")
   const [bedrooms, setBedrooms] = useState<number | string>("")
@@ -184,7 +181,6 @@ export default function VideoGenerator() {
       const data = await response.json()
       setGeneratedScript(data.script)
       setScriptMethod(data.method)
-      setCurrentStep("generate")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
@@ -205,7 +201,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
-      setCurrentStep("generate")
     } finally {
       setIsGeneratingScript(false)
     }
@@ -230,7 +225,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
     // Pass data to seamless generator
-    const data = {
+    const propertyData = {
       address,
       price: Number(price),
       bedrooms: Number(bedrooms),
@@ -241,13 +236,11 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       imageUrls: imageUrls,
     }
 
-    setPropertyData(data)
-    setCurrentStep("video")
+    // The SeamlessVideoGenerator will handle everything from here
+    return { propertyData }
   }
 
-  const resetToUpload = () => {
-    setCurrentStep("upload")
-    setPropertyData(null)
+  const resetForm = () => {
     setAddress("")
     setPrice("")
     setBedrooms("")
@@ -267,429 +260,339 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
   const uploadingCount = uploadedImages.filter((img) => img.isUploading).length
   const failedCount = uploadedImages.filter((img) => img.uploadError).length
 
+  // Check if we should show the seamless generator
+  const shouldShowGenerator = isLoading && !videoUrl && !error
+  const propertyData = shouldShowGenerator
+    ? {
+        address,
+        price: Number(price),
+        bedrooms: Number(bedrooms),
+        bathrooms: Number(bathrooms),
+        sqft: Number(sqft),
+        propertyDescription: propertyDescription.trim(),
+        script: generatedScript,
+        imageUrls: uploadedImages.filter((img) => img.blobUrl).map((img) => img.blobUrl!),
+      }
+    : null
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
-      <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl space-y-8">
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-4">
+        <div className="text-center space-y-4">
+          <div className="flex items-center justify-center gap-2">
             <Sparkles className="h-8 w-8 text-purple-600" />
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent tracking-tight">
               SnapSold
             </h1>
             <Sparkles className="h-8 w-8 text-pink-600" />
           </div>
-          <p className="text-xl text-gray-600 mb-2">AI-Powered Real Estate Video Generator</p>
-          <p className="text-sm text-gray-500">Create stunning TikTok-style property videos with Rachel's voice</p>
+          <p className="text-lg text-gray-600 leading-relaxed">Create viral listing videos that sell homes fast</p>
         </div>
 
-        {/* Progress Steps */}
-        <div className="flex justify-center mb-8">
-          <div className="flex items-center space-x-4">
-            <div
-              className={`flex items-center gap-2 px-4 py-2 rounded-full ${
-                currentStep === "upload" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              <Upload className="h-4 w-4" />
-              <span className="text-sm font-medium">Upload Photos</span>
-            </div>
-            <div className="w-8 h-px bg-gray-300"></div>
-            <div
-              className={`flex items-center gap-2 px-4 py-2 rounded-full ${
-                currentStep === "generate" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              <Wand2 className="h-4 w-4" />
-              <span className="text-sm font-medium">Generate Script</span>
-            </div>
-            <div className="w-8 h-px bg-gray-300"></div>
-            <div
-              className={`flex items-center gap-2 px-4 py-2 rounded-full ${
-                currentStep === "video" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              <Video className="h-4 w-4" />
-              <span className="text-sm font-medium">Create Video</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Content */}
-        <div className="max-w-4xl mx-auto">
-          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-            <CardHeader className="text-center">
-              <CardTitle className="text-2xl font-bold text-gray-800">
-                {currentStep === "upload" && "Upload Property Photos"}
-                {currentStep === "generate" && "Generate AI Script"}
-                {currentStep === "video" && "Create Your Video"}
-              </CardTitle>
-              <CardDescription className="text-gray-600">
-                {currentStep === "upload" && "Upload up to 30 high-quality property photos"}
-                {currentStep === "generate" && "AI will create a compelling property description"}
-                {currentStep === "video" && "Generate your professional property video with Rachel's voice"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {currentStep === "upload" && (
-                <div className="space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="address">Property Address</Label>
-                      <Input
-                        id="address"
-                        type="text"
-                        placeholder="e.g., 123 Main St, Anytown, USA"
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        className="h-12"
-                        disabled={isLoading}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="price">Price ($)</Label>
-                      <Input
-                        id="price"
-                        type="number"
-                        placeholder="e.g., 500000"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        className="h-12"
-                        disabled={isLoading}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="bedrooms">Bedrooms</Label>
-                      <Input
-                        id="bedrooms"
-                        type="number"
-                        placeholder="e.g., 3"
-                        value={bedrooms}
-                        onChange={(e) => setBedrooms(e.target.value)}
-                        className="h-12"
-                        disabled={isLoading}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="bathrooms">Bathrooms</Label>
-                      <Input
-                        id="bathrooms"
-                        type="number"
-                        placeholder="e.g., 2.5"
-                        value={bathrooms}
-                        onChange={(e) => setBathrooms(e.target.value)}
-                        className="h-12"
-                        disabled={isLoading}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="sqft">Square Footage</Label>
-                      <Input
-                        id="sqft"
-                        type="number"
-                        placeholder="e.g., 2500"
-                        value={sqft}
-                        onChange={(e) => setSqft(e.target.value)}
-                        className="h-12"
-                        disabled={isLoading}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="property-description" className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Property Description & Key Features (Optional)
-                    </Label>
-                    <Textarea
-                      id="property-description"
-                      value={propertyDescription}
-                      onChange={(e) => setPropertyDescription(e.target.value)}
-                      placeholder="Describe unique features, amenities, recent upgrades..."
-                      className="min-h-[100px]"
-                      disabled={isLoading}
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="images">
-                        Upload Property Images (Max {MAX_IMAGES})
-                        <span className="ml-2 text-xs text-gray-500">
-                          {uploadedCount} uploaded, {uploadingCount} uploading, {failedCount} failed
-                        </span>
-                      </Label>
-                    </div>
-
-                    <Input
-                      id="images"
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="h-12"
-                      disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
-                    />
-
-                    {uploadingCount > 0 && (
-                      <Alert>
-                        <Upload className="h-4 w-4" />
-                        <AlertDescription>Uploading {uploadingCount} image(s)...</AlertDescription>
-                      </Alert>
-                    )}
-
-                    {failedCount > 0 && (
-                      <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>{failedCount} image(s) failed to upload.</AlertDescription>
-                      </Alert>
-                    )}
-
-                    {uploadedImages.length > 0 && (
-                      <div className="border rounded-lg p-4 bg-gray-50 max-h-80 overflow-y-auto">
-                        <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                          {uploadedImages.map((img, index) => (
-                            <div key={img.id} className="relative group">
-                              <img
-                                src={img.previewUrl || "/placeholder.svg"}
-                                alt={`Property image ${index + 1}`}
-                                className="w-full h-20 object-cover rounded-md border"
-                              />
-                              <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
-                                {index + 1}
-                              </div>
-                              {img.isUploading && (
-                                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-md">
-                                  <Loader2 className="h-4 w-4 text-white animate-spin" />
-                                </div>
-                              )}
-                              {img.uploadError && (
-                                <div className="absolute inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center rounded-md">
-                                  <XCircle className="h-4 w-4 text-white" />
-                                </div>
-                              )}
-                              {img.blobUrl && (
-                                <div className="absolute top-1 right-6 bg-green-500 bg-opacity-75 rounded-full p-1">
-                                  <CheckCircle className="h-3 w-3 text-white" />
-                                </div>
-                              )}
-                              <Button
-                                variant="destructive"
-                                size="icon"
-                                className="absolute top-1 right-1 h-5 w-5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                                onClick={() => removeImage(img.id)}
-                                disabled={isLoading}
-                              >
-                                <XCircle className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {uploadedImages.length === 0 && (
-                      <div className="text-center text-gray-500 text-sm py-8 border-2 border-dashed border-gray-300 rounded-lg">
-                        <ImageIcon className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-                        <p>No images uploaded yet.</p>
-                        <p className="text-xs">Upload up to {MAX_IMAGES} property images</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="generated-script">
-                        AI-Generated TikTok Script
-                        {scriptMethod && (
-                          <span className="ml-2 text-xs text-gray-500">
-                            ({scriptMethod === "OpenAI" ? "AI-powered" : "Template"})
-                          </span>
-                        )}
-                      </Label>
-                      <Button
-                        onClick={generateAIScript}
-                        disabled={isGeneratingScript || !address || !price || !bedrooms || !bathrooms || !sqft}
-                        variant="outline"
-                        size="sm"
-                        className="h-8 bg-transparent"
-                      >
-                        {isGeneratingScript ? (
-                          <>
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                            Generating...
-                          </>
-                        ) : (
-                          <>
-                            <Wand2 className="mr-1 h-3 w-3" />
-                            Generate Script
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                    <Textarea
-                      id="generated-script"
-                      value={generatedScript}
-                      onChange={(e) => setGeneratedScript(e.target.value)}
-                      placeholder="Click 'Generate Script' to create an AI-powered TikTok script..."
-                      className="min-h-[120px]"
-                      disabled={isLoading}
-                    />
-                  </div>
-
-                  {/* SINGLE GENERATE BUTTON */}
-                  <Button
-                    onClick={handleGenerateVideo}
-                    disabled={
-                      isLoading ||
-                      !address ||
-                      !price ||
-                      !bedrooms ||
-                      !bathrooms ||
-                      !sqft ||
-                      !generatedScript ||
-                      uploadedImages.length === 0 ||
-                      uploadingCount > 0 ||
-                      uploadedCount === 0
-                    }
-                    className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                        Generating Video...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="mr-3 h-6 w-6" />
-                        Generate Video
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-
-              {currentStep === "generate" && (
-                <div className="space-y-8">
-                  <div className="space-y-2">
-                    <Label htmlFor="generated-script">
-                      AI-Generated TikTok Script
-                      {scriptMethod && (
-                        <span className="ml-2 text-xs text-gray-500">
-                          ({scriptMethod === "OpenAI" ? "AI-powered" : "Template"})
-                        </span>
-                      )}
-                    </Label>
-                    <Textarea
-                      id="generated-script"
-                      value={generatedScript}
-                      onChange={(e) => setGeneratedScript(e.target.value)}
-                      placeholder="Click 'Generate Script' to create an AI-powered TikTok script..."
-                      className="min-h-[120px]"
-                      disabled={isLoading}
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleGenerateVideo}
-                    disabled={
-                      isLoading ||
-                      !address ||
-                      !price ||
-                      !bedrooms ||
-                      !bathrooms ||
-                      !sqft ||
-                      !generatedScript ||
-                      uploadedImages.length === 0 ||
-                      uploadingCount > 0 ||
-                      uploadedCount === 0
-                    }
-                    className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                        Generating Video...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="mr-3 h-6 w-6" />
-                        Generate Video
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-
-              {currentStep === "video" && propertyData && (
-                <SeamlessVideoGenerator
-                  propertyData={propertyData}
-                  onVideoGenerated={(url) => {
-                    setVideoUrl(url)
-                    setIsLoading(false)
-                  }}
-                  onError={(err) => {
-                    setError(err)
-                    setIsLoading(false)
-                  }}
-                  onReset={resetToUpload}
+        {/* Form */}
+        <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+          <CardContent className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="address">Property Address</Label>
+                <Input
+                  id="address"
+                  type="text"
+                  placeholder="e.g., 123 Main St, Anytown, USA"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  className="h-12"
+                  disabled={isLoading}
                 />
-              )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="price">Price ($)</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  placeholder="e.g., 500000"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  className="h-12"
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
 
-              {/* Error */}
-              {error && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    <div className="space-y-3">
-                      <p>{error}</p>
-                      <Button onClick={() => setError(null)} variant="outline" size="sm" className="bg-white">
-                        <RefreshCw className="mr-2 h-3 w-3" />
-                        Try Again
-                      </Button>
-                    </div>
-                  </AlertDescription>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="bedrooms">Bedrooms</Label>
+                <Input
+                  id="bedrooms"
+                  type="number"
+                  placeholder="e.g., 3"
+                  value={bedrooms}
+                  onChange={(e) => setBedrooms(e.target.value)}
+                  className="h-12"
+                  disabled={isLoading}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bathrooms">Bathrooms</Label>
+                <Input
+                  id="bathrooms"
+                  type="number"
+                  placeholder="e.g., 2.5"
+                  value={bathrooms}
+                  onChange={(e) => setBathrooms(e.target.value)}
+                  className="h-12"
+                  disabled={isLoading}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sqft">Square Footage</Label>
+                <Input
+                  id="sqft"
+                  type="number"
+                  placeholder="e.g., 2500"
+                  value={sqft}
+                  onChange={(e) => setSqft(e.target.value)}
+                  className="h-12"
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="property-description" className="flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Property Description & Key Features (Optional)
+              </Label>
+              <Textarea
+                id="property-description"
+                value={propertyDescription}
+                onChange={(e) => setPropertyDescription(e.target.value)}
+                placeholder="Describe unique features, amenities, recent upgrades..."
+                className="min-h-[100px]"
+                disabled={isLoading}
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="images">
+                  Upload Property Images (Max {MAX_IMAGES})
+                  <span className="ml-2 text-xs text-gray-500">
+                    {uploadedCount} uploaded, {uploadingCount} uploading, {failedCount} failed
+                  </span>
+                </Label>
+              </div>
+
+              <Input
+                id="images"
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="h-12"
+                disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
+              />
+
+              {uploadingCount > 0 && (
+                <Alert>
+                  <Upload className="h-4 w-4" />
+                  <AlertDescription>Uploading {uploadingCount} image(s)...</AlertDescription>
                 </Alert>
               )}
 
-              {/* Download Section */}
-              {videoUrl && (
-                <div className="space-y-8">
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-                    <div className="flex items-center justify-center gap-2 text-green-700">
-                      <CheckCircle className="h-6 w-6" />
-                      <span className="font-bold text-lg">✅ Video Generated Successfully!</span>
-                    </div>
-                  </div>
+              {failedCount > 0 && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{failedCount} image(s) failed to upload.</AlertDescription>
+                </Alert>
+              )}
 
-                  <div className="flex gap-3">
-                    <Button onClick={resetToUpload} variant="outline" className="flex-1 bg-transparent">
-                      Generate Another
-                    </Button>
-                    <Button
-                      asChild
-                      className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
-                    >
-                      <a href={videoUrl} download="tiktok-property-video.mp4">
-                        <Download className="mr-2 h-5 w-5" />
-                        Download MP4
-                      </a>
-                    </Button>
+              {uploadedImages.length > 0 && (
+                <div className="border rounded-lg p-4 bg-gray-50 max-h-80 overflow-y-auto">
+                  <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                    {uploadedImages.map((img, index) => (
+                      <div key={img.id} className="relative group">
+                        <img
+                          src={img.previewUrl || "/placeholder.svg"}
+                          alt={`Property image ${index + 1}`}
+                          className="w-full h-20 object-cover rounded-md border"
+                        />
+                        <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
+                          {index + 1}
+                        </div>
+                        {img.isUploading && (
+                          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-md">
+                            <Loader2 className="h-4 w-4 text-white animate-spin" />
+                          </div>
+                        )}
+                        {img.uploadError && (
+                          <div className="absolute inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center rounded-md">
+                            <XCircle className="h-4 w-4 text-white" />
+                          </div>
+                        )}
+                        {img.blobUrl && (
+                          <div className="absolute top-1 right-6 bg-green-500 bg-opacity-75 rounded-full p-1">
+                            <CheckCircle className="h-3 w-3 text-white" />
+                          </div>
+                        )}
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute top-1 right-1 h-5 w-5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => removeImage(img.id)}
+                          disabled={isLoading}
+                        >
+                          <XCircle className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
+
+              {uploadedImages.length === 0 && (
+                <div className="text-center text-gray-500 text-sm py-8 border-2 border-dashed border-gray-300 rounded-lg">
+                  <ImageIcon className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                  <p>No images uploaded yet.</p>
+                  <p className="text-xs">Upload up to {MAX_IMAGES} property images</p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="generated-script">
+                  AI-Generated TikTok Script
+                  {scriptMethod && (
+                    <span className="ml-2 text-xs text-gray-500">
+                      ({scriptMethod === "OpenAI" ? "AI-powered" : "Template"})
+                    </span>
+                  )}
+                </Label>
+                <Button
+                  onClick={generateAIScript}
+                  disabled={isGeneratingScript || !address || !price || !bedrooms || !bathrooms || !sqft}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 bg-transparent"
+                >
+                  {isGeneratingScript ? (
+                    <>
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="mr-1 h-3 w-3" />
+                      Generate Script
+                    </>
+                  )}
+                </Button>
+              </div>
+              <Textarea
+                id="generated-script"
+                value={generatedScript}
+                onChange={(e) => setGeneratedScript(e.target.value)}
+                placeholder="Click 'Generate Script' to create an AI-powered TikTok script..."
+                className="min-h-[120px]"
+                disabled={isLoading}
+              />
+            </div>
+
+            {/* SINGLE GENERATE BUTTON */}
+            <Button
+              onClick={handleGenerateVideo}
+              disabled={
+                isLoading ||
+                !address ||
+                !price ||
+                !bedrooms ||
+                !bathrooms ||
+                !sqft ||
+                !generatedScript ||
+                uploadedImages.length === 0 ||
+                uploadingCount > 0 ||
+                uploadedCount === 0
+              }
+              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-3 h-6 w-6 animate-spin" />
+                  Generating Video...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-3 h-6 w-6" />
+                  Generate Video
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Seamless Video Generator */}
+        {shouldShowGenerator && propertyData && (
+          <SeamlessVideoGenerator
+            propertyData={propertyData}
+            onVideoGenerated={(url) => {
+              setVideoUrl(url)
+              setIsLoading(false)
+            }}
+            onError={(err) => {
+              setError(err)
+              setIsLoading(false)
+            }}
+          />
+        )}
+
+        {/* Error */}
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <div className="space-y-3">
+                <p>{error}</p>
+                <Button onClick={() => setError(null)} variant="outline" size="sm" className="bg-white">
+                  <RefreshCw className="mr-2 h-3 w-3" />
+                  Try Again
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Download Section */}
+        {videoUrl && (
+          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+            <CardContent className="p-6">
+              <div className="text-center space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                  <div className="flex items-center justify-center gap-2 text-green-700">
+                    <CheckCircle className="h-6 w-6" />
+                    <span className="font-bold text-lg">✅ Video Generated Successfully!</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
+                    Generate Another
+                  </Button>
+                  <Button
+                    asChild
+                    className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
+                  >
+                    <a href={videoUrl} download="tiktok-property-video.mp4">
+                      <Download className="mr-2 h-5 w-5" />
+                      Download MP4
+                    </a>
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center mt-12 text-gray-500 text-sm">
-          <p>Powered by ElevenLabs Rachel Voice • OpenAI GPT-4 • Advanced Video Processing</p>
-          <p className="mt-1">Perfect for TikTok, Instagram Reels, and YouTube Shorts</p>
-        </div>
+        )}
       </div>
     </div>
   )

@@ -1,4 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { generateText } from "ai"
+import { openai } from "@ai-sdk/openai"
+
+export const maxDuration = 30
 
 interface PropertyData {
   address: string
@@ -7,121 +11,106 @@ interface PropertyData {
   bathrooms: number
   sqft: number
   propertyDescription?: string
-}
-
-// FIXED: Better number-to-word conversion for natural speech
-function numberToWords(num: number): string {
-  if (num === 0) return "zero"
-  if (num === 1) return "one"
-  if (num === 2) return "two"
-  if (num === 3) return "three"
-  if (num === 4) return "four"
-  if (num === 5) return "five"
-  if (num === 6) return "six"
-  if (num === 7) return "seven"
-  if (num === 8) return "eight"
-  if (num === 9) return "nine"
-  if (num === 10) return "ten"
-  return num.toString()
-}
-
-// FIXED: Better bathroom formatting for speech
-function formatBathrooms(bathrooms: number): string {
-  if (bathrooms === Math.floor(bathrooms)) {
-    // Whole number
-    return `${numberToWords(bathrooms)} bathroom${bathrooms !== 1 ? "s" : ""}`
-  } else {
-    // Decimal (like 1.5, 2.5, etc.)
-    const whole = Math.floor(bathrooms)
-    const decimal = bathrooms - whole
-
-    if (decimal === 0.5) {
-      if (whole === 0) {
-        return "half bathroom"
-      } else if (whole === 1) {
-        return "one and a half bathrooms"
-      } else {
-        return `${numberToWords(whole)} and a half bathrooms`
-      }
-    }
-
-    // Fallback for other decimals
-    return `${bathrooms} bathrooms`
-  }
-}
-
-// FIXED: Comprehensive script sanitization
-function sanitizeScriptForSpeech(text: string): string {
-  return (
-    text
-      // Fix smart quotes and special characters
-      .replace(/[""'']/g, '"')
-      .replace(/[\u2013\u2014]/g, "-")
-      .replace(/[^\x00-\x7F]/g, "") // Remove non-ASCII
-
-      // Fix contractions for better speech
-      .replace(/don't/gi, "do not")
-      .replace(/won't/gi, "will not")
-      .replace(/can't/gi, "cannot")
-      .replace(/isn't/gi, "is not")
-      .replace(/aren't/gi, "are not")
-      .replace(/wasn't/gi, "was not")
-      .replace(/weren't/gi, "were not")
-      .replace(/haven't/gi, "have not")
-      .replace(/hasn't/gi, "has not")
-      .replace(/hadn't/gi, "had not")
-      .replace(/wouldn't/gi, "would not")
-      .replace(/shouldn't/gi, "should not")
-      .replace(/couldn't/gi, "could not")
-
-      // Normalize whitespace
-      .replace(/\s+/g, " ")
-      .trim()
-  )
+  imageCount?: number
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const data: PropertyData = await request.json()
+    const propertyData: PropertyData = await request.json()
+    console.log("🏠 Generating script for:", propertyData.address)
 
-    // Validation
-    if (!data.address || !data.price) {
-      return NextResponse.json({ error: "Address and price are required" }, { status: 400 })
+    // Validate required fields
+    if (
+      !propertyData.address ||
+      !propertyData.price ||
+      !propertyData.bedrooms ||
+      !propertyData.bathrooms ||
+      !propertyData.sqft
+    ) {
+      return NextResponse.json({ error: "Missing required property data" }, { status: 400 })
     }
 
-    // Format property details for natural speech
-    const bedroomText = numberToWords(data.bedrooms)
-    const bathroomText = formatBathrooms(data.bathrooms)
-    const sqftText = data.sqft.toLocaleString()
-    const priceText = data.price.toLocaleString()
+    let script = ""
+    let method = ""
 
-    // Generate engaging script
-    const scriptTemplate = `I have been in real estate for years, and this property still amazes me! I am excited to show you ${data.address}! You get ${bedroomText} bedrooms and ${bathroomText} in this spacious ${sqftText} square foot layout! The amazing features do not stop there! ${data.propertyDescription || `This beautiful ${bedroomText} bedroom home offers incredible value and comfort.`} Do not miss your chance to see this property. Schedule a showing today. Listed at $${priceText}, this property will not last long! And with ${data.bedrooms > 15 ? 30 : data.bedrooms + 15} stunning photos, you can see every amazing detail! This is your chance to own something special! Contact me immediately!`
+    // Try OpenAI first
+    try {
+      console.log("🤖 Attempting OpenAI script generation...")
 
-    // FIXED: Apply comprehensive sanitization
-    const sanitizedScript = sanitizeScriptForSpeech(scriptTemplate)
+      const prompt = `Create an engaging 30-45 second TikTok script for a real estate listing. Make it energetic, attention-grabbing, and perfect for a female voice (Rachel from ElevenLabs).
 
-    console.log("✅ Script generated and sanitized successfully")
-    console.log(`📝 Script length: ${sanitizedScript.length} characters`)
+Property Details:
+- Address: ${propertyData.address}
+- Price: $${propertyData.price.toLocaleString()}
+- Bedrooms: ${propertyData.bedrooms}
+- Bathrooms: ${propertyData.bathrooms}
+- Square Feet: ${propertyData.sqft.toLocaleString()}
+${propertyData.propertyDescription ? `- Description: ${propertyData.propertyDescription}` : ""}
+${propertyData.imageCount ? `- Number of photos: ${propertyData.imageCount}` : ""}
+
+Requirements:
+- Start with an attention-grabbing hook
+- Mention key features and price
+- Create urgency and excitement
+- End with a clear call-to-action
+- Keep it conversational and energetic
+- Perfect for TikTok/Instagram Reels
+- 30-45 seconds when spoken aloud
+- NO emojis or special characters (they cause audio generation issues)
+
+Write ONLY the script text, nothing else.`
+
+      const result = await generateText({
+        model: openai("gpt-4o-mini"),
+        prompt,
+        maxTokens: 300,
+        temperature: 0.8,
+      })
+
+      script = result.text.trim()
+      method = "OpenAI"
+      console.log("✅ OpenAI script generated successfully")
+    } catch (openaiError) {
+      console.warn("⚠️ OpenAI failed, using fallback template:", openaiError)
+
+      // Fallback template
+      const bedroomText = propertyData.bedrooms === 1 ? "1 bedroom" : `${propertyData.bedrooms} bedrooms`
+      const bathroomText = propertyData.bathrooms === 1 ? "1 bathroom" : `${propertyData.bathrooms} bathrooms`
+
+      script = `Stop scrolling! This property is about to blow your mind!
+
+Welcome to ${propertyData.address}! This stunning home features ${bedroomText} and ${bathroomText}, with ${propertyData.sqft.toLocaleString()} square feet of pure luxury.
+
+${propertyData.propertyDescription ? `But wait, there's more! ${propertyData.propertyDescription}` : "This home has everything you need and more!"}
+
+And the best part? It's priced at just ${propertyData.price.toLocaleString()} dollars. This incredible opportunity won't last long!
+
+Don't let this dream home slip away. Message me right now to schedule your private showing. Seriously, do it now!`
+
+      method = "Template"
+    }
+
+    // Clean up the script
+    script = script
+      .replace(/[^\w\s.,!?$-]/g, "") // Remove special characters but keep basic punctuation
+      .replace(/\s+/g, " ")
+      .trim()
+
+    console.log(`📝 Generated script (${method}): ${script.length} characters`)
 
     return NextResponse.json({
-      success: true,
-      script: sanitizedScript,
-      metadata: {
-        originalLength: scriptTemplate.length,
-        sanitizedLength: sanitizedScript.length,
-        propertyDetails: {
-          bedrooms: bedroomText,
-          bathrooms: bathroomText,
-          sqft: sqftText,
-          price: priceText,
-        },
-      },
+      script,
+      method,
+      length: script.length,
+      estimatedDuration: Math.ceil(script.split(" ").length / 3), // Rough estimate: 3 words per second
     })
   } catch (error) {
-    console.error("Script generation error:", error)
+    console.error("❌ Script generation error:", error)
     return NextResponse.json(
-      { error: "Failed to generate script", details: error instanceof Error ? error.message : String(error) },
+      {
+        error: "Failed to generate script",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }
