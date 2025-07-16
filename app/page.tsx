@@ -220,57 +220,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     })
   }, [])
 
-  const generateAudio = async (script: string): Promise<{ audioUrl: string; duration: number }> => {
-    if (!process.env.ELEVENLABS_API_KEY) {
-      throw new Error("ElevenLabs API key not configured")
-    }
-
-    const cleanScript = script
-      .replace(/[^\w\s.,!?'-]/g, " ")
-      .replace(/\s+/g, " ")
-      .replace(/\$(\d+)/g, "$1 dollars")
-      .trim()
-
-    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
-      method: "POST",
-      headers: {
-        Accept: "audio/mpeg",
-        "Content-Type": "application/json",
-        "xi-api-key": process.env.ELEVENLABS_API_KEY,
-      },
-      body: JSON.stringify({
-        text: cleanScript,
-        model_id: "eleven_monolingual_v1",
-        voice_settings: {
-          stability: 0.7,
-          similarity_boost: 0.8,
-          style: 0.3,
-          use_speaker_boost: true,
-        },
-        output_format: "mp3_44100_128",
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
-    }
-
-    const audioBlob = await response.blob()
-    if (audioBlob.size === 0) {
-      throw new Error("Empty audio response")
-    }
-
-    const arrayBuffer = await audioBlob.arrayBuffer()
-    const base64Audio = Buffer.from(arrayBuffer).toString("base64")
-    const audioUrl = `data:audio/mpeg;base64,${base64Audio}`
-
-    const wordCount = cleanScript.split(" ").length
-    const estimatedDuration = Math.max(15, Math.ceil((wordCount / 150) * 60))
-
-    return { audioUrl, duration: estimatedDuration }
-  }
-
   const generateCaptions = (script: string, duration: number) => {
     const sentences = script
       .replace(/[^\w\s.,!?'-]/g, " ")
@@ -343,16 +292,31 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       canvas.width = 576
       canvas.height = 1024
 
-      // Step 1: Generate audio (0-20%)
+      // Step 1: Generate audio (0-25%)
       setProgress(5)
-      const { audioUrl, duration } = await generateAudio(generatedScript)
-      setProgress(20)
+      console.log("Generating audio...")
 
-      // Step 2: Generate captions (20-25%)
-      const captions = generateCaptions(generatedScript, duration)
+      const audioResponse = await fetch("/api/generate-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script: generatedScript }),
+      })
+
+      if (!audioResponse.ok) {
+        const errorData = await audioResponse.json()
+        throw new Error(errorData.details || errorData.error || "Audio generation failed")
+      }
+
+      const { audioUrl, duration } = await audioResponse.json()
       setProgress(25)
 
-      // Step 3: Load images (25-40%)
+      // Step 2: Generate captions (25-30%)
+      console.log("Generating captions...")
+      const captions = generateCaptions(generatedScript, duration)
+      setProgress(30)
+
+      // Step 3: Load images (30-50%)
+      console.log("Loading images...")
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
       const loadedImages: HTMLImageElement[] = []
 
@@ -360,7 +324,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         try {
           const img = await loadImage(imageUrls[i])
           loadedImages.push(img)
-          setProgress(25 + (i / imageUrls.length) * 15)
+          setProgress(30 + (i / imageUrls.length) * 20)
         } catch (error) {
           console.warn(`Failed to load image ${i + 1}:`, error)
         }
@@ -370,193 +334,233 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         throw new Error("No images could be loaded")
       }
 
-      setProgress(40)
+      setProgress(50)
 
-      // Step 4: Setup audio (40-45%)
+      // Step 4: Setup audio (50-55%)
+      console.log("Setting up audio...")
       audio.src = audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
 
       await new Promise<void>((resolve, reject) => {
-        audio.oncanplaythrough = () => resolve()
-        audio.onerror = reject
+        const timeout = setTimeout(() => {
+          reject(new Error("Audio loading timeout"))
+        }, 10000)
+
+        audio.oncanplaythrough = () => {
+          clearTimeout(timeout)
+          resolve()
+        }
+        audio.onerror = () => {
+          clearTimeout(timeout)
+          reject(new Error("Audio loading failed"))
+        }
         audio.load()
       })
 
-      setProgress(45)
+      setProgress(55)
 
-      // Step 5: Setup recording (45-50%)
-      const canvasStream = canvas.captureStream(30)
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-      const audioSource = audioContext.createMediaElementSource(audio)
-      const audioDestination = audioContext.createMediaStreamDestination()
+      // Step 5: Setup recording (55-60%)
+      console.log("Setting up recording...")
 
-      audioSource.connect(audioDestination)
+      let audioContext: AudioContext | null = null
+      let audioSource: MediaElementAudioSourceNode | null = null
+      let audioDestination: MediaStreamAudioDestinationNode | null = null
 
-      const combinedStream = new MediaStream()
-      canvasStream.getVideoTracks().forEach((track) => {
-        combinedStream.addTrack(track)
-      })
-      audioDestination.stream.getAudioTracks().forEach((track) => {
-        combinedStream.addTrack(track)
-      })
+      try {
+        const canvasStream = canvas.captureStream(30)
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
 
-      const mediaRecorder = new MediaRecorder(combinedStream, {
-        mimeType: "video/webm;codecs=vp9,opus",
-        videoBitsPerSecond: 2500000,
-        audioBitsPerSecond: 128000,
-      })
-
-      const chunks: Blob[] = []
-
-      setProgress(50)
-
-      // Step 6: Record video (50-95%)
-      await new Promise<void>((resolve, reject) => {
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            chunks.push(event.data)
-          }
+        // Resume audio context if suspended
+        if (audioContext.state === "suspended") {
+          await audioContext.resume()
         }
 
-        mediaRecorder.onstop = async () => {
+        audioSource = audioContext.createMediaElementSource(audio)
+        audioDestination = audioContext.createMediaStreamDestination()
+
+        // Connect audio source to both destination and default output
+        audioSource.connect(audioDestination)
+        audioSource.connect(audioContext.destination)
+
+        const combinedStream = new MediaStream()
+        canvasStream.getVideoTracks().forEach((track) => {
+          combinedStream.addTrack(track)
+        })
+        audioDestination.stream.getAudioTracks().forEach((track) => {
+          combinedStream.addTrack(track)
+        })
+
+        const mediaRecorder = new MediaRecorder(combinedStream, {
+          mimeType: "video/webm;codecs=vp9,opus",
+          videoBitsPerSecond: 2500000,
+          audioBitsPerSecond: 128000,
+        })
+
+        const chunks: Blob[] = []
+        setProgress(60)
+
+        // Step 6: Record video (60-95%)
+        console.log("Recording video...")
+        await new Promise<void>((resolve, reject) => {
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              chunks.push(event.data)
+            }
+          }
+
+          mediaRecorder.onstop = async () => {
+            try {
+              if (audioContext) {
+                await audioContext.close()
+              }
+            } catch (e) {
+              console.warn("Audio context cleanup:", e)
+            }
+
+            try {
+              if (chunks.length === 0) {
+                throw new Error("No video data recorded")
+              }
+
+              const videoBlob = new Blob(chunks, { type: "video/webm" })
+              const videoUrl = URL.createObjectURL(videoBlob)
+              setVideoUrl(videoUrl)
+
+              // Auto-download
+              const link = document.createElement("a")
+              link.href = videoUrl
+              link.download = "property-video.webm"
+              document.body.appendChild(link)
+              link.click()
+              document.body.removeChild(link)
+
+              resolve()
+            } catch (error) {
+              reject(error)
+            }
+          }
+
+          mediaRecorder.onerror = (event) => {
+            reject(new Error("Recording failed"))
+          }
+
+          mediaRecorder.start(100)
+
+          // Start audio and animation
+          audio.currentTime = 0
+          audio.play().catch(console.error)
+
+          const startTime = Date.now()
+          const durationMs = duration * 1000
+          const timePerImageMs = Math.max(2000, Math.floor(durationMs / loadedImages.length))
+
+          const animate = () => {
+            const elapsed = Date.now() - startTime
+            const elapsedSeconds = elapsed / 1000
+
+            if (elapsed >= durationMs) {
+              audio.pause()
+              mediaRecorder.stop()
+              return
+            }
+
+            // Calculate current image
+            const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
+
+            // Find current caption
+            const currentCaptionData = captions.find(
+              (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
+            )
+
+            // Draw current image
+            const img = loadedImages[imageIndex]
+            if (img) {
+              // Clear canvas
+              ctx.fillStyle = "#000000"
+              ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+              // Draw image
+              const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
+              const scaledWidth = img.width * scale
+              const scaledHeight = img.height * scale
+              const x = (canvas.width - scaledWidth) / 2
+              const y = (canvas.height - scaledHeight) / 2
+
+              ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+
+              // Draw captions
+              if (currentCaptionData) {
+                const fontSize = Math.floor(canvas.width * 0.08)
+                ctx.font = `900 ${fontSize}px Arial, sans-serif`
+                ctx.textAlign = "center"
+
+                const words = currentCaptionData.text.split(" ")
+                const lines: string[] = []
+
+                for (let i = 0; i < words.length; i += 2) {
+                  lines.push(words.slice(i, i + 2).join(" "))
+                }
+
+                const lineHeight = fontSize * 1.3
+                const startY = canvas.height * 0.75
+
+                lines.forEach((line, lineIndex) => {
+                  const y = startY + lineIndex * lineHeight
+
+                  // Black outline
+                  ctx.strokeStyle = "#000000"
+                  ctx.lineWidth = Math.floor(fontSize * 0.2)
+                  ctx.strokeText(line, canvas.width / 2, y)
+
+                  // Yellow text
+                  ctx.fillStyle = "#FFFF00"
+                  ctx.fillText(line, canvas.width / 2, y)
+                })
+              }
+
+              // Property info overlay
+              ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
+              ctx.fillRect(0, 0, canvas.width, 80)
+
+              ctx.fillStyle = "#FFFFFF"
+              ctx.font = "bold 16px Arial"
+              ctx.textAlign = "left"
+              ctx.fillText(address, 15, 25)
+
+              ctx.fillStyle = "#FFD700"
+              ctx.font = "bold 14px Arial"
+              ctx.fillText(`$${Number(price).toLocaleString()}`, 15, 45)
+
+              ctx.fillStyle = "#FFFFFF"
+              ctx.font = "12px Arial"
+              ctx.fillText(`${bedrooms}BR • ${bathrooms}BA • ${Number(sqft).toLocaleString()} sqft`, 15, 65)
+            }
+
+            // Update progress
+            const recordingProgress = 60 + (elapsed / durationMs) * 35
+            setProgress(Math.min(95, recordingProgress))
+
+            requestAnimationFrame(animate)
+          }
+
+          animate()
+        })
+
+        setProgress(100)
+        setIsGenerating(false)
+        console.log("Video generation complete!")
+      } catch (recordingError) {
+        // Clean up audio context on error
+        if (audioContext) {
           try {
             await audioContext.close()
           } catch (e) {
-            console.warn("Audio context cleanup:", e)
-          }
-
-          try {
-            if (chunks.length === 0) {
-              throw new Error("No video data recorded")
-            }
-
-            const videoBlob = new Blob(chunks, { type: "video/webm" })
-            const videoUrl = URL.createObjectURL(videoBlob)
-            setVideoUrl(videoUrl)
-
-            // Auto-download
-            const link = document.createElement("a")
-            link.href = videoUrl
-            link.download = "property-video.webm"
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-
-            resolve()
-          } catch (error) {
-            reject(error)
+            console.warn("Audio context cleanup on error:", e)
           }
         }
-
-        mediaRecorder.onerror = (event) => {
-          reject(new Error("Recording failed"))
-        }
-
-        mediaRecorder.start(100)
-
-        // Start audio and animation
-        audio.currentTime = 0
-        audio.play()
-
-        const startTime = Date.now()
-        const durationMs = duration * 1000
-        const timePerImageMs = Math.max(2000, Math.floor(durationMs / loadedImages.length))
-
-        const animate = () => {
-          const elapsed = Date.now() - startTime
-          const elapsedSeconds = elapsed / 1000
-
-          if (elapsed >= durationMs) {
-            audio.pause()
-            mediaRecorder.stop()
-            return
-          }
-
-          // Calculate current image
-          const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
-
-          // Find current caption
-          const currentCaptionData = captions.find(
-            (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
-          )
-
-          // Draw current image
-          const img = loadedImages[imageIndex]
-          if (img) {
-            // Clear canvas
-            ctx.fillStyle = "#000000"
-            ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-            // Draw image
-            const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
-            const scaledWidth = img.width * scale
-            const scaledHeight = img.height * scale
-            const x = (canvas.width - scaledWidth) / 2
-            const y = (canvas.height - scaledHeight) / 2
-
-            ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
-
-            // Draw captions
-            if (currentCaptionData) {
-              const fontSize = Math.floor(canvas.width * 0.08)
-              ctx.font = `900 ${fontSize}px Arial, sans-serif`
-              ctx.textAlign = "center"
-
-              const words = currentCaptionData.text.split(" ")
-              const lines: string[] = []
-
-              for (let i = 0; i < words.length; i += 2) {
-                lines.push(words.slice(i, i + 2).join(" "))
-              }
-
-              const lineHeight = fontSize * 1.3
-              const startY = canvas.height * 0.75
-
-              lines.forEach((line, lineIndex) => {
-                const y = startY + lineIndex * lineHeight
-
-                // Black outline
-                ctx.strokeStyle = "#000000"
-                ctx.lineWidth = Math.floor(fontSize * 0.2)
-                ctx.strokeText(line, canvas.width / 2, y)
-
-                // Yellow text
-                ctx.fillStyle = "#FFFF00"
-                ctx.fillText(line, canvas.width / 2, y)
-              })
-            }
-
-            // Property info overlay
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
-            ctx.fillRect(0, 0, canvas.width, 80)
-
-            ctx.fillStyle = "#FFFFFF"
-            ctx.font = "bold 16px Arial"
-            ctx.textAlign = "left"
-            ctx.fillText(address, 15, 25)
-
-            ctx.fillStyle = "#FFD700"
-            ctx.font = "bold 14px Arial"
-            ctx.fillText(`$${Number(price).toLocaleString()}`, 15, 45)
-
-            ctx.fillStyle = "#FFFFFF"
-            ctx.font = "12px Arial"
-            ctx.fillText(`${bedrooms}BR • ${bathrooms}BA • ${Number(sqft).toLocaleString()} sqft`, 15, 65)
-          }
-
-          // Update progress
-          const recordingProgress = 50 + (elapsed / durationMs) * 45
-          setProgress(Math.min(95, recordingProgress))
-
-          requestAnimationFrame(animate)
-        }
-
-        animate()
-      })
-
-      setProgress(100)
-      setIsGenerating(false)
+        throw recordingError
+      }
     } catch (error) {
       console.error("Video generation failed:", error)
       setError(error instanceof Error ? error.message : "Video generation failed")
