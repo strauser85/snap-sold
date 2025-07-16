@@ -33,12 +33,8 @@ function sanitizeScriptForElevenLabs(script: string): string {
   console.log("🧹 SANITIZING SCRIPT FOR ELEVENLABS...")
 
   let sanitized = script
-    // Remove emojis and special characters that cause issues
-    .replace(
-      
- {6}/[🚨🏠💰✨📱🔥💎🌟⭐🎯💯🚀💪👑🎉🏆💝🎊🌈💫⚡🎁🔮💖🌺🦋🌸💐🌻🌷🌹🌼🌿🍀🌱🌲🌳🌴🌵🌾🌿🍃🍂🍁🍄🌰🌱🌿🍀🌺🌸🌼🌻🌷🌹💐🌾🌿🍃🍂🍁🍄🌰]/gu,
-      "",
-    )
+    // Remove ALL emoji / pictographs
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
     // Clean up multiple spaces and line breaks
     .replace(/\s+/g, " ")
     .replace(/\n+/g, ". ")
@@ -48,7 +44,6 @@ function sanitizeScriptForElevenLabs(script: string): string {
     .replace(/[.]{2,}/g, ".")
     // Ensure proper sentence endings
     .replace(/([a-zA-Z0-9])\s*([A-Z])/g, "$1. $2")
-    // Clean up any remaining issues
     .trim()
 
   // Ensure it ends with proper punctuation
