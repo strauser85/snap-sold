@@ -230,7 +230,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
   // Generate key feature captions only
   const generateKeyFeatureCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
-    const timePerCaption = duration / 6 // Spread captions throughout video
 
     // Key features to highlight
     const features = [
@@ -271,59 +270,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     })
 
     return captions
-  }
-
-  // Convert WebM to MP4 using canvas and MediaRecorder
-  const convertToMP4 = async (webmBlob: Blob): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement("video")
-      const canvas = document.createElement("canvas")
-      const ctx = canvas.getContext("2d")!
-
-      video.src = URL.createObjectURL(webmBlob)
-      video.muted = true
-
-      video.onloadedmetadata = () => {
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-
-        const stream = canvas.captureStream(30)
-        const recorder = new MediaRecorder(stream, {
-          mimeType: "video/mp4;codecs=h264,aac",
-          videoBitsPerSecond: 2500000,
-          audioBitsPerSecond: 128000,
-        })
-
-        const chunks: Blob[] = []
-
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) chunks.push(e.data)
-        }
-
-        recorder.onstop = () => {
-          const mp4Blob = new Blob(chunks, { type: "video/mp4" })
-          URL.revokeObjectURL(video.src)
-          resolve(mp4Blob)
-        }
-
-        recorder.start()
-        video.play()
-
-        const drawFrame = () => {
-          if (video.ended) {
-            recorder.stop()
-            return
-          }
-
-          ctx.drawImage(video, 0, 0)
-          requestAnimationFrame(drawFrame)
-        }
-
-        video.ontimeupdate = drawFrame
-      }
-
-      video.onerror = () => reject(new Error("Video conversion failed"))
-    })
   }
 
   const handleGenerateVideo = async () => {
@@ -419,7 +365,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
       setProgress(45)
 
-      // Step 5: Setup recording (45-50%)
+      // Step 5: Setup recording (45-50%) - USE WEBM ONLY
       let audioContext: AudioContext | null = null
       let audioSource: MediaElementAudioSourceNode | null = null
       let audioDestination: MediaStreamAudioDestinationNode | null = null
@@ -446,16 +392,17 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
           combinedStream.addTrack(track)
         })
 
+        // USE WEBM FORMAT ONLY - NO MP4 RECORDING
         const mediaRecorder = new MediaRecorder(combinedStream, {
           mimeType: "video/webm;codecs=vp9,opus",
-          videoBitsPerSecond: 2500000,
+          videoBitsPerSecorder: 2500000,
           audioBitsPerSecond: 128000,
         })
 
         const chunks: Blob[] = []
         setProgress(50)
 
-        // Step 6: Record video (50-85%)
+        // Step 6: Record video (50-90%)
         await new Promise<void>((resolve, reject) => {
           mediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
@@ -478,38 +425,21 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
               }
 
               const webmBlob = new Blob(chunks, { type: "video/webm" })
-              setProgress(85)
+              setProgress(90)
 
-              // Step 7: Convert to MP4 (85-95%)
-              try {
-                const mp4Blob = await convertToMP4(webmBlob)
-                const videoUrl = URL.createObjectURL(mp4Blob)
-                setVideoUrl(videoUrl)
-                setProgress(95)
+              // Create download URL and auto-download
+              const videoUrl = URL.createObjectURL(webmBlob)
+              setVideoUrl(videoUrl)
 
-                // Auto-download MP4
-                const link = document.createElement("a")
-                link.href = videoUrl
-                link.download = "property-video.mp4"
-                document.body.appendChild(link)
-                link.click()
-                document.body.removeChild(link)
+              // Auto-download WebM (compatible with most platforms)
+              const link = document.createElement("a")
+              link.href = videoUrl
+              link.download = "property-video.webm"
+              document.body.appendChild(link)
+              link.click()
+              document.body.removeChild(link)
 
-                resolve()
-              } catch (conversionError) {
-                // Fallback to WebM if MP4 conversion fails
-                const videoUrl = URL.createObjectURL(webmBlob)
-                setVideoUrl(videoUrl)
-
-                const link = document.createElement("a")
-                link.href = videoUrl
-                link.download = "property-video.webm"
-                document.body.appendChild(link)
-                link.click()
-                document.body.removeChild(link)
-
-                resolve()
-              }
+              resolve()
             } catch (error) {
               reject(error)
             }
@@ -620,8 +550,8 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
             }
 
             // Update progress
-            const recordingProgress = 50 + (elapsed / durationMs) * 35
-            setProgress(Math.min(85, recordingProgress))
+            const recordingProgress = 50 + (elapsed / durationMs) * 40
+            setProgress(Math.min(90, recordingProgress))
 
             requestAnimationFrame(animate)
           }
@@ -975,7 +905,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                     asChild
                     className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
                   >
-                    <a href={videoUrl} download="property-video.mp4">
+                    <a href={videoUrl} download="property-video.webm">
                       <Download className="mr-2 h-5 w-5" />
                       Download Again
                     </a>
