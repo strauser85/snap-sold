@@ -1,14 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-interface AudioRequest {
-  script: string
-}
+export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
   try {
-    const { script }: AudioRequest = await request.json()
+    const { script } = await request.json()
 
-    if (!script?.trim()) {
+    if (!script) {
       return NextResponse.json({ error: "Script is required" }, { status: 400 })
     }
 
@@ -30,9 +28,7 @@ export async function POST(request: NextRequest) {
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.8,
-          style: 0.2,
-          use_speaker_boost: true,
+          similarity_boost: 0.5,
         },
       }),
     })
@@ -40,25 +36,23 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text()
       console.error("ElevenLabs API error:", response.status, errorText)
-      throw new Error(`ElevenLabs API error: ${response.status}`)
+      return NextResponse.json({ error: "Audio generation failed" }, { status: 500 })
     }
 
     const audioBuffer = await response.arrayBuffer()
-    console.log("✅ Audio generated, size:", audioBuffer.byteLength)
+    const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" })
 
     // Upload to Vercel Blob
     const { put } = await import("@vercel/blob")
-    const blob = await put(`audio-${Date.now()}.mp3`, audioBuffer, {
+    const blob = await put(`audio-${Date.now()}.mp3`, audioBlob, {
       access: "public",
-      contentType: "audio/mpeg",
     })
 
-    // Get audio duration (estimate based on script length)
-    const wordsPerMinute = 150
+    // Estimate duration (rough calculation: ~150 words per minute)
     const wordCount = script.split(" ").length
-    const estimatedDuration = Math.max(10, (wordCount / wordsPerMinute) * 60)
+    const estimatedDuration = Math.max(10, (wordCount / 150) * 60)
 
-    console.log(`🎵 Audio uploaded: ${blob.url}, estimated duration: ${estimatedDuration}s`)
+    console.log("✅ Audio generated successfully")
 
     return NextResponse.json({
       audioUrl: blob.url,

@@ -20,15 +20,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "File too large (max 10MB)" }, { status: 400 })
     }
 
+    console.log("📤 Uploading image to Vercel Blob...")
+
     // Upload to Vercel Blob
     const blob = await put(`property-${Date.now()}-${file.name}`, file, {
       access: "public",
-      contentType: file.type,
     })
+
+    console.log("✅ Image uploaded successfully:", blob.url)
 
     return NextResponse.json({
       url: blob.url,
-      success: true,
+      size: file.size,
+      type: file.type,
     })
   } catch (error) {
     console.error("Image upload error:", error)

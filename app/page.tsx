@@ -266,33 +266,35 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
     })
   }, [])
 
-  // Generate key feature captions only
+  // Generate key feature captions only - FIXED NULL SAFETY
   const generateKeyFeatureCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
-    // Safely convert numbers to words for captions
-    const bedroomsWord = bedrooms ? numberToWords(Number(bedrooms)).toUpperCase() : "UNKNOWN"
-    const bathroomsWord = bathrooms ? numberToWords(Number(bathrooms)).toUpperCase() : "UNKNOWN"
+    // Safely convert numbers to words for captions with null checks
+    const safeAddress = address || "Property"
+    const safeBedrooms = bedrooms ? Number(bedrooms) : 0
+    const safeBathrooms = bathrooms ? Number(bathrooms) : 0
+    const safeSqft = sqft ? Number(sqft) : 0
+    const safePrice = price ? Number(price) : 0
 
-    // Key features to highlight
+    const bedroomsWord = safeBedrooms > 0 ? numberToWords(safeBedrooms).toUpperCase() : "UNKNOWN"
+    const bathroomsWord = safeBathrooms > 0 ? numberToWords(safeBathrooms).toUpperCase() : "UNKNOWN"
+
+    // Key features to highlight with safe string operations
     const features = [
       { text: `${bedroomsWord} BEDROOMS`, type: "feature" as const, timing: 0.15 },
       { text: `${bathroomsWord} BATHROOMS`, type: "feature" as const, timing: 0.25 },
-      { text: `${Number(sqft || 0).toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
-      { text: `$${Number(price || 0).toLocaleString()}`, type: "price" as const, timing: 0.65 },
+      { text: `${safeSqft.toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
+      { text: `$${safePrice.toLocaleString()}`, type: "price" as const, timing: 0.65 },
       {
-        text: address
-          ? address.includes(",")
-            ? address.split(",")[0].toUpperCase()
-            : address.toUpperCase()
-          : "PROPERTY",
+        text: safeAddress.includes(",") ? safeAddress.split(",")[0].toUpperCase() : safeAddress.toUpperCase(),
         type: "location" as const,
         timing: 0.75,
       },
     ]
 
     // Add property description highlights if available
-    if (propertyDescription?.trim()) {
+    if (propertyDescription && propertyDescription.trim()) {
       const highlights = propertyDescription
         .split(/[,.!]/)
         .map((s) => s.trim())
@@ -632,7 +634,7 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
               })
             }
 
-            // Property info overlay (always visible) - using full words
+            // Property info overlay (always visible) - using full words with null safety
             ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
             ctx.fillRect(0, 0, canvas.width, 80)
 
@@ -647,10 +649,12 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
 
             ctx.fillStyle = "#FFFFFF"
             ctx.font = "12px Arial"
-            const bedroomsText = Number(bedrooms || 0) === 1 ? "bedroom" : "bedrooms"
-            const bathroomsText = Number(bathrooms || 0) === 1 ? "bathroom" : "bathrooms"
+            const safeBedrooms = Number(bedrooms || 0)
+            const safeBathrooms = Number(bathrooms || 0)
+            const bedroomsText = safeBedrooms === 1 ? "bedroom" : "bedrooms"
+            const bathroomsText = safeBathrooms === 1 ? "bathroom" : "bathrooms"
             ctx.fillText(
-              `${bedrooms || 0} ${bedroomsText} • ${bathrooms || 0} ${bathroomsText} • ${Number(sqft || 0).toLocaleString()} sqft`,
+              `${safeBedrooms} ${bedroomsText} • ${safeBathrooms} ${bathroomsText} • ${Number(sqft || 0).toLocaleString()} sqft`,
               15,
               65,
             )
