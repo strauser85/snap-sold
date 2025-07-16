@@ -20,7 +20,7 @@ import {
   RefreshCw,
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
-import { SeamlessVideoGenerator } from "@/components/seamless-video-generator"
+import { ReliableVideoGenerator } from "@/components/reliable-video-generator"
 
 interface UploadedImage {
   file: File
@@ -44,6 +44,7 @@ export default function VideoGenerator() {
 
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
+  const [videoConfig, setVideoConfig] = useState<any>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -185,7 +186,7 @@ export default function VideoGenerator() {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
       // Fallback script
-      let basicScript = `🚨 This property is about to BLOW YOUR MIND! 🚨
+      let basicScript = `Stop scrolling! This property is about to BLOW YOUR MIND!
 
 Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
 
@@ -197,7 +198,7 @@ But wait, there's more! ${propertyDescription.trim()}`
 
       basicScript += `
 
-Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Don't let this slip away! DM me NOW! 📱✨`
+Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Don't let this slip away! DM me NOW!`
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
@@ -221,23 +222,38 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     setIsLoading(true)
     setError(null)
     setVideoUrl(null)
+    setVideoConfig(null)
 
-    const imageUrls = successfulImages.map((img) => img.blobUrl!)
+    try {
+      const imageUrls = successfulImages.map((img) => img.blobUrl!)
 
-    // Pass data to seamless generator
-    const propertyData = {
-      address,
-      price: Number(price),
-      bedrooms: Number(bedrooms),
-      bathrooms: Number(bathrooms),
-      sqft: Number(sqft),
-      propertyDescription: propertyDescription.trim(),
-      script: generatedScript,
-      imageUrls: imageUrls,
+      const response = await fetch("/api/generate-reliable-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address,
+          price: Number(price),
+          bedrooms: Number(bedrooms),
+          bathrooms: Number(bathrooms),
+          sqft: Number(sqft),
+          propertyDescription: propertyDescription.trim(),
+          script: generatedScript,
+          imageUrls,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.details || errorData.error || "Video generation failed")
+      }
+
+      const config = await response.json()
+      setVideoConfig(config)
+      setIsLoading(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Video generation failed")
+      setIsLoading(false)
     }
-
-    // The SeamlessVideoGenerator will handle everything from here
-    return { propertyData }
   }
 
   const resetForm = () => {
@@ -252,6 +268,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     setUploadedImages([])
     setVideoUrl(null)
+    setVideoConfig(null)
     setError(null)
     setIsLoading(false)
   }
@@ -259,21 +276,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
   const uploadingCount = uploadedImages.filter((img) => img.isUploading).length
   const failedCount = uploadedImages.filter((img) => img.uploadError).length
-
-  // Check if we should show the seamless generator
-  const shouldShowGenerator = isLoading && !videoUrl && !error
-  const propertyData = shouldShowGenerator
-    ? {
-        address,
-        price: Number(price),
-        bedrooms: Number(bedrooms),
-        bathrooms: Number(bathrooms),
-        sqft: Number(sqft),
-        propertyDescription: propertyDescription.trim(),
-        script: generatedScript,
-        imageUrls: uploadedImages.filter((img) => img.blobUrl).map((img) => img.blobUrl!),
-      }
-    : null
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
@@ -283,11 +285,11 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
           <div className="flex items-center justify-center gap-2">
             <Sparkles className="h-8 w-8 text-purple-600" />
             <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent tracking-tight">
-              SnapSold
+              SnapSold RELIABLE
             </h1>
             <Sparkles className="h-8 w-8 text-pink-600" />
           </div>
-          <p className="text-lg text-gray-600 leading-relaxed">Create viral listing videos that sell homes fast</p>
+          <p className="text-lg text-gray-600 leading-relaxed">GUARANTEED audio embedding and synchronized captions</p>
         </div>
 
         {/* Form */}
@@ -500,7 +502,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
               />
             </div>
 
-            {/* SINGLE GENERATE BUTTON */}
+            {/* GENERATE BUTTON */}
             <Button
               onClick={handleGenerateVideo}
               disabled={
@@ -515,34 +517,34 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 uploadingCount > 0 ||
                 uploadedCount === 0
               }
-              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
+              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-green-600 via-blue-600 to-purple-600 hover:from-green-700 hover:via-blue-700 hover:to-purple-700 shadow-lg"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                  Generating Video...
+                  Preparing RELIABLE Video...
                 </>
               ) : (
                 <>
                   <Sparkles className="mr-3 h-6 w-6" />
-                  Generate Video
+                  Generate RELIABLE Video
                 </>
               )}
             </Button>
           </CardContent>
         </Card>
 
-        {/* Seamless Video Generator */}
-        {shouldShowGenerator && propertyData && (
-          <SeamlessVideoGenerator
-            propertyData={propertyData}
+        {/* Reliable Video Generator */}
+        {videoConfig && !videoUrl && (
+          <ReliableVideoGenerator
+            config={videoConfig}
             onVideoGenerated={(url) => {
               setVideoUrl(url)
-              setIsLoading(false)
+              setVideoConfig(null)
             }}
             onError={(err) => {
               setError(err)
-              setIsLoading(false)
+              setVideoConfig(null)
             }}
           />
         )}
@@ -571,7 +573,11 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 <div className="bg-green-50 border border-green-200 rounded-lg p-6">
                   <div className="flex items-center justify-center gap-2 text-green-700">
                     <CheckCircle className="h-6 w-6" />
-                    <span className="font-bold text-lg">✅ Video Generated Successfully!</span>
+                    <span className="font-bold text-lg">✅ RELIABLE Video Generated!</span>
+                  </div>
+                  <div className="text-sm text-green-600 mt-2">
+                    <p>🎵 Audio GUARANTEED embedded</p>
+                    <p>📝 Captions synchronized with speech</p>
                   </div>
                 </div>
 
@@ -583,9 +589,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                     asChild
                     className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
                   >
-                    <a href={videoUrl} download="tiktok-property-video.mp4">
+                    <a href={videoUrl} download="reliable-property-video.webm">
                       <Download className="mr-2 h-5 w-5" />
-                      Download MP4
+                      Download RELIABLE Video
                     </a>
                   </Button>
                 </div>
