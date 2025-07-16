@@ -301,7 +301,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       canvas.width = 576
       canvas.height = 1024
 
-      // Step 1: Generate audio (0-20%)
+      // Step 1: Generate audio (0-15%)
       setProgress(5)
       const audioResponse = await fetch("/api/generate-audio", {
         method: "POST",
@@ -315,13 +315,13 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       }
 
       const { audioUrl, duration } = await audioResponse.json()
+      setProgress(15)
+
+      // Step 2: Generate key feature captions (15-20%)
+      const captions = generateKeyFeatureCaptions(duration)
       setProgress(20)
 
-      // Step 2: Generate key feature captions (20-25%)
-      const captions = generateKeyFeatureCaptions(duration)
-      setProgress(25)
-
-      // Step 3: Load images (25-40%)
+      // Step 3: Load images (20-35%)
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
       const loadedImages: HTMLImageElement[] = []
 
@@ -329,7 +329,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         try {
           const img = await loadImage(imageUrls[i])
           loadedImages.push(img)
-          setProgress(25 + (i / imageUrls.length) * 15)
+          setProgress(20 + (i / imageUrls.length) * 15)
         } catch (error) {
           console.warn(`Failed to load image ${i + 1}:`, error)
         }
@@ -339,13 +339,14 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         throw new Error("No images could be loaded")
       }
 
-      setProgress(40)
+      setProgress(35)
 
-      // Step 4: Setup audio (40-45%) - NO PREVIEW PLAYBACK
+      // Step 4: Setup audio (35-40%) - NO PREVIEW PLAYBACK
       audio.src = audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
       audio.muted = true // Disable preview playback
+      audio.volume = 1.0 // Ensure full volume for recording
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -363,12 +364,13 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         audio.load()
       })
 
-      setProgress(45)
+      setProgress(40)
 
-      // Step 5: Setup recording (45-50%) - USE WEBM ONLY
+      // Step 5: Setup recording with PROPER AUDIO EMBEDDING (40-45%)
       let audioContext: AudioContext | null = null
       let audioSource: MediaElementAudioSourceNode | null = null
       let audioDestination: MediaStreamAudioDestinationNode | null = null
+      let gainNode: GainNode | null = null
 
       try {
         const canvasStream = canvas.captureStream(30)
@@ -378,31 +380,46 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
           await audioContext.resume()
         }
 
+        // Create audio nodes for proper embedding
         audioSource = audioContext.createMediaElementSource(audio)
         audioDestination = audioContext.createMediaStreamDestination()
+        gainNode = audioContext.createGain()
 
-        // Connect audio for recording only (no preview)
-        audioSource.connect(audioDestination)
+        // Set gain to ensure audio is audible
+        gainNode.gain.value = 1.0
 
+        // Connect audio chain: source -> gain -> destination
+        audioSource.connect(gainNode)
+        gainNode.connect(audioDestination)
+
+        // Create combined stream with both video and audio
         const combinedStream = new MediaStream()
+
+        // Add video track
         canvasStream.getVideoTracks().forEach((track) => {
           combinedStream.addTrack(track)
         })
+
+        // Add audio track with proper settings
         audioDestination.stream.getAudioTracks().forEach((track) => {
+          track.enabled = true
           combinedStream.addTrack(track)
         })
 
-        // USE WEBM FORMAT ONLY - NO MP4 RECORDING
+        // Verify we have both audio and video tracks
+        console.log("Video tracks:", combinedStream.getVideoTracks().length)
+        console.log("Audio tracks:", combinedStream.getAudioTracks().length)
+
         const mediaRecorder = new MediaRecorder(combinedStream, {
           mimeType: "video/webm;codecs=vp9,opus",
-          videoBitsPerSecorder: 2500000,
+          videoBitsPerSecond: 2500000,
           audioBitsPerSecond: 128000,
         })
 
         const chunks: Blob[] = []
-        setProgress(50)
+        setProgress(45)
 
-        // Step 6: Record video (50-90%)
+        // Step 6: Record video with embedded audio (45-75%)
         await new Promise<void>((resolve, reject) => {
           mediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
@@ -425,20 +442,45 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
               }
 
               const webmBlob = new Blob(chunks, { type: "video/webm" })
-              setProgress(90)
+              setProgress(75)
 
-              // Create download URL and auto-download
-              const videoUrl = URL.createObjectURL(webmBlob)
-              setVideoUrl(videoUrl)
+              // Step 7: Convert WebM to MP4 (75-95%)
+              const formData = new FormData()
+              formData.append("webm", webmBlob)
 
-              // Auto-download WebM (compatible with most platforms)
+              const convertResponse = await fetch("/api/convert-to-mp4", {
+                method: "POST",
+                body: formData,
+              })
+
+              if (!convertResponse.ok) {
+                // Fallback to WebM if conversion fails
+                const videoUrl = URL.createObjectURL(webmBlob)
+                setVideoUrl(videoUrl)
+
+                const link = document.createElement("a")
+                link.href = videoUrl
+                link.download = "property-video.webm"
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+
+                resolve()
+                return
+              }
+
+              const { mp4Url } = await convertResponse.json()
+              setProgress(95)
+
+              // Download MP4
               const link = document.createElement("a")
-              link.href = videoUrl
-              link.download = "property-video.webm"
+              link.href = mp4Url
+              link.download = "property-video.mp4"
               document.body.appendChild(link)
               link.click()
               document.body.removeChild(link)
 
+              setVideoUrl(mp4Url)
               resolve()
             } catch (error) {
               reject(error)
@@ -451,9 +493,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
           mediaRecorder.start(100)
 
-          // Start silent audio and animation
+          // Start audio playback for recording (muted for user)
           audio.currentTime = 0
-          audio.muted = true // Ensure no preview playback
+          audio.muted = true // User doesn't hear it
           audio.play().catch(console.error)
 
           const startTime = Date.now()
@@ -550,8 +592,8 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
             }
 
             // Update progress
-            const recordingProgress = 50 + (elapsed / durationMs) * 40
-            setProgress(Math.min(90, recordingProgress))
+            const recordingProgress = 45 + (elapsed / durationMs) * 30
+            setProgress(Math.min(75, recordingProgress))
 
             requestAnimationFrame(animate)
           }
@@ -893,7 +935,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 <div className="bg-green-50 border border-green-200 rounded-lg p-6">
                   <div className="flex items-center justify-center gap-2 text-green-700">
                     <CheckCircle className="h-6 w-6" />
-                    <span className="font-bold text-lg">✅ Video Generated & Downloaded!</span>
+                    <span className="font-bold text-lg">✅ MP4 Video Generated & Downloaded!</span>
                   </div>
                 </div>
 
@@ -905,9 +947,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                     asChild
                     className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
                   >
-                    <a href={videoUrl} download="property-video.webm">
+                    <a href={videoUrl} download="property-video.mp4">
                       <Download className="mr-2 h-5 w-5" />
-                      Download Again
+                      Download MP4 Again
                     </a>
                   </Button>
                 </div>
