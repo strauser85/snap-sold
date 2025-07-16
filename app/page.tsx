@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, type ChangeEvent } from "react"
+import { useState, useRef, useCallback, type ChangeEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Progress } from "@/components/ui/progress"
 import {
   Loader2,
   Download,
@@ -20,7 +21,6 @@ import {
   RefreshCw,
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
-import { ReliableVideoGenerator } from "@/components/reliable-video-generator"
 
 interface UploadedImage {
   file: File
@@ -42,11 +42,14 @@ export default function VideoGenerator() {
   const [generatedScript, setGeneratedScript] = useState("")
   const [scriptMethod, setScriptMethod] = useState<string>("")
 
-  const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
-  const [videoConfig, setVideoConfig] = useState<any>(null)
+  const [progress, setProgress] = useState(0)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
 
   const MAX_IMAGES = 30
 
@@ -207,6 +210,110 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     }
   }
 
+  const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = "anonymous"
+      img.onload = () => resolve(img)
+      img.onerror = reject
+      img.src = src
+    })
+  }, [])
+
+  const generateAudio = async (script: string): Promise<{ audioUrl: string; duration: number }> => {
+    if (!process.env.ELEVENLABS_API_KEY) {
+      throw new Error("ElevenLabs API key not configured")
+    }
+
+    const cleanScript = script
+      .replace(/[^\w\s.,!?'-]/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/\$(\d+)/g, "$1 dollars")
+      .trim()
+
+    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+      method: "POST",
+      headers: {
+        Accept: "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": process.env.ELEVENLABS_API_KEY,
+      },
+      body: JSON.stringify({
+        text: cleanScript,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.7,
+          similarity_boost: 0.8,
+          style: 0.3,
+          use_speaker_boost: true,
+        },
+        output_format: "mp3_44100_128",
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
+    }
+
+    const audioBlob = await response.blob()
+    if (audioBlob.size === 0) {
+      throw new Error("Empty audio response")
+    }
+
+    const arrayBuffer = await audioBlob.arrayBuffer()
+    const base64Audio = Buffer.from(arrayBuffer).toString("base64")
+    const audioUrl = `data:audio/mpeg;base64,${base64Audio}`
+
+    const wordCount = cleanScript.split(" ").length
+    const estimatedDuration = Math.max(15, Math.ceil((wordCount / 150) * 60))
+
+    return { audioUrl, duration: estimatedDuration }
+  }
+
+  const generateCaptions = (script: string, duration: number) => {
+    const sentences = script
+      .replace(/[^\w\s.,!?'-]/g, " ")
+      .split(/[.!?]+/)
+      .filter((s) => s.trim().length > 0)
+      .map((s) => s.trim())
+
+    const captions = []
+    let currentTime = 0.5
+    const timePerSentence = (duration - 1) / sentences.length
+
+    sentences.forEach((sentence) => {
+      if (sentence.length > 0) {
+        const words = sentence.split(" ")
+        const phrases = []
+
+        for (let i = 0; i < words.length; i += 3) {
+          const phrase = words.slice(i, i + 3).join(" ")
+          if (phrase.trim()) {
+            phrases.push(phrase.trim().toUpperCase())
+          }
+        }
+
+        const phraseTime = timePerSentence / phrases.length
+
+        phrases.forEach((phrase, phraseIndex) => {
+          const startTime = currentTime + phraseIndex * phraseTime
+          const endTime = startTime + phraseTime - 0.1
+
+          captions.push({
+            text: phrase,
+            startTime: Math.max(0, startTime),
+            endTime: Math.min(duration, endTime),
+          })
+        })
+      }
+
+      currentTime += timePerSentence
+    })
+
+    return captions
+  }
+
   const handleGenerateVideo = async () => {
     if (!address || !price || !bedrooms || !bathrooms || !sqft || !generatedScript || uploadedImages.length === 0) {
       setError("Please fill in all details, generate a script, and upload at least one image.")
@@ -219,40 +326,242 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       return
     }
 
-    setIsLoading(true)
+    setIsGenerating(true)
     setError(null)
     setVideoUrl(null)
-    setVideoConfig(null)
+    setProgress(0)
 
     try {
-      const imageUrls = successfulImages.map((img) => img.blobUrl!)
-
-      const response = await fetch("/api/generate-reliable-video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address,
-          price: Number(price),
-          bedrooms: Number(bedrooms),
-          bathrooms: Number(bathrooms),
-          sqft: Number(sqft),
-          propertyDescription: propertyDescription.trim(),
-          script: generatedScript,
-          imageUrls,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.details || errorData.error || "Video generation failed")
+      if (!canvasRef.current || !audioRef.current) {
+        throw new Error("Canvas or audio not available")
       }
 
-      const config = await response.json()
-      setVideoConfig(config)
-      setIsLoading(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Video generation failed")
-      setIsLoading(false)
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext("2d")!
+      const audio = audioRef.current
+
+      canvas.width = 576
+      canvas.height = 1024
+
+      // Step 1: Generate audio (0-20%)
+      setProgress(5)
+      const { audioUrl, duration } = await generateAudio(generatedScript)
+      setProgress(20)
+
+      // Step 2: Generate captions (20-25%)
+      const captions = generateCaptions(generatedScript, duration)
+      setProgress(25)
+
+      // Step 3: Load images (25-40%)
+      const imageUrls = successfulImages.map((img) => img.blobUrl!)
+      const loadedImages: HTMLImageElement[] = []
+
+      for (let i = 0; i < imageUrls.length; i++) {
+        try {
+          const img = await loadImage(imageUrls[i])
+          loadedImages.push(img)
+          setProgress(25 + (i / imageUrls.length) * 15)
+        } catch (error) {
+          console.warn(`Failed to load image ${i + 1}:`, error)
+        }
+      }
+
+      if (loadedImages.length === 0) {
+        throw new Error("No images could be loaded")
+      }
+
+      setProgress(40)
+
+      // Step 4: Setup audio (40-45%)
+      audio.src = audioUrl
+      audio.preload = "auto"
+      audio.crossOrigin = "anonymous"
+
+      await new Promise<void>((resolve, reject) => {
+        audio.oncanplaythrough = () => resolve()
+        audio.onerror = reject
+        audio.load()
+      })
+
+      setProgress(45)
+
+      // Step 5: Setup recording (45-50%)
+      const canvasStream = canvas.captureStream(30)
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const audioSource = audioContext.createMediaElementSource(audio)
+      const audioDestination = audioContext.createMediaStreamDestination()
+
+      audioSource.connect(audioDestination)
+
+      const combinedStream = new MediaStream()
+      canvasStream.getVideoTracks().forEach((track) => {
+        combinedStream.addTrack(track)
+      })
+      audioDestination.stream.getAudioTracks().forEach((track) => {
+        combinedStream.addTrack(track)
+      })
+
+      const mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: "video/webm;codecs=vp9,opus",
+        videoBitsPerSecond: 2500000,
+        audioBitsPerSecond: 128000,
+      })
+
+      const chunks: Blob[] = []
+
+      setProgress(50)
+
+      // Step 6: Record video (50-95%)
+      await new Promise<void>((resolve, reject) => {
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            chunks.push(event.data)
+          }
+        }
+
+        mediaRecorder.onstop = async () => {
+          try {
+            await audioContext.close()
+          } catch (e) {
+            console.warn("Audio context cleanup:", e)
+          }
+
+          try {
+            if (chunks.length === 0) {
+              throw new Error("No video data recorded")
+            }
+
+            const videoBlob = new Blob(chunks, { type: "video/webm" })
+            const videoUrl = URL.createObjectURL(videoBlob)
+            setVideoUrl(videoUrl)
+
+            // Auto-download
+            const link = document.createElement("a")
+            link.href = videoUrl
+            link.download = "property-video.webm"
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        }
+
+        mediaRecorder.onerror = (event) => {
+          reject(new Error("Recording failed"))
+        }
+
+        mediaRecorder.start(100)
+
+        // Start audio and animation
+        audio.currentTime = 0
+        audio.play()
+
+        const startTime = Date.now()
+        const durationMs = duration * 1000
+        const timePerImageMs = Math.max(2000, Math.floor(durationMs / loadedImages.length))
+
+        const animate = () => {
+          const elapsed = Date.now() - startTime
+          const elapsedSeconds = elapsed / 1000
+
+          if (elapsed >= durationMs) {
+            audio.pause()
+            mediaRecorder.stop()
+            return
+          }
+
+          // Calculate current image
+          const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
+
+          // Find current caption
+          const currentCaptionData = captions.find(
+            (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
+          )
+
+          // Draw current image
+          const img = loadedImages[imageIndex]
+          if (img) {
+            // Clear canvas
+            ctx.fillStyle = "#000000"
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+            // Draw image
+            const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
+            const scaledWidth = img.width * scale
+            const scaledHeight = img.height * scale
+            const x = (canvas.width - scaledWidth) / 2
+            const y = (canvas.height - scaledHeight) / 2
+
+            ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+
+            // Draw captions
+            if (currentCaptionData) {
+              const fontSize = Math.floor(canvas.width * 0.08)
+              ctx.font = `900 ${fontSize}px Arial, sans-serif`
+              ctx.textAlign = "center"
+
+              const words = currentCaptionData.text.split(" ")
+              const lines: string[] = []
+
+              for (let i = 0; i < words.length; i += 2) {
+                lines.push(words.slice(i, i + 2).join(" "))
+              }
+
+              const lineHeight = fontSize * 1.3
+              const startY = canvas.height * 0.75
+
+              lines.forEach((line, lineIndex) => {
+                const y = startY + lineIndex * lineHeight
+
+                // Black outline
+                ctx.strokeStyle = "#000000"
+                ctx.lineWidth = Math.floor(fontSize * 0.2)
+                ctx.strokeText(line, canvas.width / 2, y)
+
+                // Yellow text
+                ctx.fillStyle = "#FFFF00"
+                ctx.fillText(line, canvas.width / 2, y)
+              })
+            }
+
+            // Property info overlay
+            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
+            ctx.fillRect(0, 0, canvas.width, 80)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "bold 16px Arial"
+            ctx.textAlign = "left"
+            ctx.fillText(address, 15, 25)
+
+            ctx.fillStyle = "#FFD700"
+            ctx.font = "bold 14px Arial"
+            ctx.fillText(`$${Number(price).toLocaleString()}`, 15, 45)
+
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "12px Arial"
+            ctx.fillText(`${bedrooms}BR • ${bathrooms}BA • ${Number(sqft).toLocaleString()} sqft`, 15, 65)
+          }
+
+          // Update progress
+          const recordingProgress = 50 + (elapsed / durationMs) * 45
+          setProgress(Math.min(95, recordingProgress))
+
+          requestAnimationFrame(animate)
+        }
+
+        animate()
+      })
+
+      setProgress(100)
+      setIsGenerating(false)
+    } catch (error) {
+      console.error("Video generation failed:", error)
+      setError(error instanceof Error ? error.message : "Video generation failed")
+      setIsGenerating(false)
+      setProgress(0)
     }
   }
 
@@ -268,9 +577,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     setUploadedImages([])
     setVideoUrl(null)
-    setVideoConfig(null)
     setError(null)
-    setIsLoading(false)
+    setIsGenerating(false)
+    setProgress(0)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -279,17 +588,20 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
+      <canvas ref={canvasRef} className="hidden" width={576} height={1024} />
+      <audio ref={audioRef} preload="auto" className="hidden" />
+
       <div className="w-full max-w-2xl space-y-8">
         {/* Header */}
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-2">
             <Sparkles className="h-8 w-8 text-purple-600" />
             <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent tracking-tight">
-              SnapSold RELIABLE
+              SnapSold
             </h1>
             <Sparkles className="h-8 w-8 text-pink-600" />
           </div>
-          <p className="text-lg text-gray-600 leading-relaxed">GUARANTEED audio embedding and synchronized captions</p>
+          <p className="text-lg text-gray-600 leading-relaxed">Create viral listing videos that sell homes fast</p>
         </div>
 
         {/* Form */}
@@ -305,7 +617,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   className="h-12"
-                  disabled={isLoading}
+                  disabled={isGenerating}
                 />
               </div>
               <div className="space-y-2">
@@ -317,7 +629,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
                   className="h-12"
-                  disabled={isLoading}
+                  disabled={isGenerating}
                 />
               </div>
             </div>
@@ -332,7 +644,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                   value={bedrooms}
                   onChange={(e) => setBedrooms(e.target.value)}
                   className="h-12"
-                  disabled={isLoading}
+                  disabled={isGenerating}
                 />
               </div>
               <div className="space-y-2">
@@ -344,7 +656,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                   value={bathrooms}
                   onChange={(e) => setBathrooms(e.target.value)}
                   className="h-12"
-                  disabled={isLoading}
+                  disabled={isGenerating}
                 />
               </div>
               <div className="space-y-2">
@@ -356,7 +668,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                   value={sqft}
                   onChange={(e) => setSqft(e.target.value)}
                   className="h-12"
-                  disabled={isLoading}
+                  disabled={isGenerating}
                 />
               </div>
             </div>
@@ -372,7 +684,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 onChange={(e) => setPropertyDescription(e.target.value)}
                 placeholder="Describe unique features, amenities, recent upgrades..."
                 className="min-h-[100px]"
-                disabled={isLoading}
+                disabled={isGenerating}
               />
             </div>
 
@@ -393,7 +705,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 accept="image/*"
                 onChange={handleImageUpload}
                 className="h-12"
-                disabled={isLoading || uploadedImages.length >= MAX_IMAGES}
+                disabled={isGenerating || uploadedImages.length >= MAX_IMAGES}
               />
 
               {uploadingCount > 0 && (
@@ -443,7 +755,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                           size="icon"
                           className="absolute top-1 right-1 h-5 w-5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                           onClick={() => removeImage(img.id)}
-                          disabled={isLoading}
+                          disabled={isGenerating}
                         >
                           <XCircle className="h-3 w-3" />
                         </Button>
@@ -474,7 +786,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 </Label>
                 <Button
                   onClick={generateAIScript}
-                  disabled={isGeneratingScript || !address || !price || !bedrooms || !bathrooms || !sqft}
+                  disabled={
+                    isGeneratingScript || isGenerating || !address || !price || !bedrooms || !bathrooms || !sqft
+                  }
                   variant="outline"
                   size="sm"
                   className="h-8 bg-transparent"
@@ -498,15 +812,23 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 onChange={(e) => setGeneratedScript(e.target.value)}
                 placeholder="Click 'Generate Script' to create an AI-powered TikTok script..."
                 className="min-h-[120px]"
-                disabled={isLoading}
+                disabled={isGenerating}
               />
             </div>
 
-            {/* GENERATE BUTTON */}
+            {/* Progress Bar */}
+            {isGenerating && (
+              <div className="space-y-2">
+                <Progress value={progress} className="h-4" />
+                <div className="text-center text-sm font-medium text-gray-600">{Math.round(progress)}%</div>
+              </div>
+            )}
+
+            {/* SINGLE GENERATE BUTTON */}
             <Button
               onClick={handleGenerateVideo}
               disabled={
-                isLoading ||
+                isGenerating ||
                 !address ||
                 !price ||
                 !bedrooms ||
@@ -517,37 +839,22 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 uploadingCount > 0 ||
                 uploadedCount === 0
               }
-              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-green-600 via-blue-600 to-purple-600 hover:from-green-700 hover:via-blue-700 hover:to-purple-700 shadow-lg"
+              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
             >
-              {isLoading ? (
+              {isGenerating ? (
                 <>
                   <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                  Preparing RELIABLE Video...
+                  Generating Video...
                 </>
               ) : (
                 <>
                   <Sparkles className="mr-3 h-6 w-6" />
-                  Generate RELIABLE Video
+                  Generate Video
                 </>
               )}
             </Button>
           </CardContent>
         </Card>
-
-        {/* Reliable Video Generator */}
-        {videoConfig && !videoUrl && (
-          <ReliableVideoGenerator
-            config={videoConfig}
-            onVideoGenerated={(url) => {
-              setVideoUrl(url)
-              setVideoConfig(null)
-            }}
-            onError={(err) => {
-              setError(err)
-              setVideoConfig(null)
-            }}
-          />
-        )}
 
         {/* Error */}
         {error && (
@@ -565,19 +872,15 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
           </Alert>
         )}
 
-        {/* Download Section */}
-        {videoUrl && (
+        {/* Success Message */}
+        {videoUrl && !isGenerating && (
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
             <CardContent className="p-6">
               <div className="text-center space-y-4">
                 <div className="bg-green-50 border border-green-200 rounded-lg p-6">
                   <div className="flex items-center justify-center gap-2 text-green-700">
                     <CheckCircle className="h-6 w-6" />
-                    <span className="font-bold text-lg">✅ RELIABLE Video Generated!</span>
-                  </div>
-                  <div className="text-sm text-green-600 mt-2">
-                    <p>🎵 Audio GUARANTEED embedded</p>
-                    <p>📝 Captions synchronized with speech</p>
+                    <span className="font-bold text-lg">✅ Video Generated & Downloaded!</span>
                   </div>
                 </div>
 
@@ -589,9 +892,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                     asChild
                     className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
                   >
-                    <a href={videoUrl} download="reliable-property-video.webm">
+                    <a href={videoUrl} download="property-video.webm">
                       <Download className="mr-2 h-5 w-5" />
-                      Download RELIABLE Video
+                      Download Again
                     </a>
                   </Button>
                 </div>
