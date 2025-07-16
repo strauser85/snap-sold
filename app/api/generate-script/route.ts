@@ -1,14 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-interface ScriptRequest {
-  address: string
-  price: number
-  bedrooms: number
-  bathrooms: number
-  sqft: number
-  propertyDescription?: string
-  imageCount: number
-}
+import { generateText } from "ai"
+import { openai } from "@ai-sdk/openai"
 
 // Helper function to convert numbers to words
 const numberToWords = (num: number): string => {
@@ -35,118 +27,109 @@ const numberToWords = (num: number): string => {
     const oneDigit = num % 10
     return tens[tenDigit] + (oneDigit > 0 ? " " + ones[oneDigit] : "")
   }
-
+  if (num < 1000) {
+    const hundreds = Math.floor(num / 100)
+    const remainder = num % 100
+    return ones[hundreds] + " hundred" + (remainder > 0 ? " " + numberToWords(remainder) : "")
+  }
   return num.toString()
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount }: ScriptRequest =
-      await request.json()
+    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = await request.json()
 
+    // Validate required fields
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
       return NextResponse.json({ error: "Missing required property details" }, { status: 400 })
     }
 
+    // Safely convert to numbers
+    const safePrice = Number(price) || 0
+    const safeBedrooms = Number(bedrooms) || 0
+    const safeBathrooms = Number(bathrooms) || 0
+    const safeSqft = Number(sqft) || 0
+
     // Convert numbers to words for better pronunciation
-    const bedroomsText = bedrooms === 1 ? `${numberToWords(bedrooms)} bedroom` : `${numberToWords(bedrooms)} bedrooms`
+    const bedroomsText =
+      safeBedrooms === 1 ? `${numberToWords(safeBedrooms)} bedroom` : `${numberToWords(safeBedrooms)} bedrooms`
     const bathroomsText =
-      bathrooms === 1 ? `${numberToWords(bathrooms)} bathroom` : `${numberToWords(bathrooms)} bathrooms`
+      safeBathrooms === 1 ? `${numberToWords(safeBathrooms)} bathroom` : `${numberToWords(safeBathrooms)} bathrooms`
 
-    let script = ""
-
-    // Try OpenAI first if API key is available
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            messages: [
-              {
-                role: "system",
-                content: `You are a viral TikTok real estate content creator. Create engaging, energetic scripts that grab attention immediately.
+    try {
+      // Try OpenAI first
+      const { text } = await generateText({
+        model: openai("gpt-4o"),
+        system: `You are a viral TikTok real estate content creator. Create engaging, energetic scripts that hook viewers immediately and drive action. 
 
 CRITICAL RULES:
-- NO abbreviations whatsoever (never use BR, BA, sqft, etc.)
-- Always spell out numbers as words (1 = one, 2 = two, 3 = three, etc.)
-- Use full words: "bedrooms" not "BR", "bathrooms" not "BA", "square feet" not "sqft"
+- Start with a powerful hook that stops scrolling
+- Use conversational, energetic tone
+- Spell out ALL numbers as words (three bedrooms, not 3 BR)
+- Say "dollars" after price amounts
+- Include strong call-to-action at the end
 - Keep it under 45 seconds when spoken
-- Start with a hook that stops scrolling
-- Use excitement and urgency
-- End with a strong call to action
-- Make it sound natural when spoken aloud`,
-              },
-              {
-                role: "user",
-                content: `Create a viral TikTok script for this property:
-- Address: ${address}
-- Price: $${price.toLocaleString()}
-- ${bedroomsText}
-- ${bathroomsText}  
-- ${sqft.toLocaleString()} square feet
-${propertyDescription ? `- Special features: ${propertyDescription}` : ""}
-- ${imageCount} photos available
+- Make it sound natural for text-to-speech
+- Focus on benefits and lifestyle, not just features
+- Create urgency and excitement
+- NO abbreviations (BR, BA, sqft, etc.)`,
+        prompt: `Create a viral TikTok script for this property:
 
-Remember: NO abbreviations, spell out all numbers as words, make it exciting!`,
-              },
-            ],
-            max_tokens: 400,
-            temperature: 0.8,
-          }),
+Address: ${address}
+Price: $${safePrice.toLocaleString()}
+Bedrooms: ${bedroomsText}
+Bathrooms: ${bathroomsText}
+Square Feet: ${safeSqft.toLocaleString()}
+${propertyDescription ? `Description: ${propertyDescription}` : ""}
+Images Available: ${imageCount || 0}
+
+Write ONLY the script text, no stage directions or formatting. Make it exciting and viral-worthy!`,
+      })
+
+      // Clean up any remaining abbreviations
+      const cleanedScript = text
+        .replace(/\bBR\b/gi, "bedrooms")
+        .replace(/\bBA\b/gi, "bathrooms")
+        .replace(/\bsqft\b/gi, "square feet")
+        .replace(/\bSQ FT\b/gi, "square feet")
+        .replace(/\d+/g, (match) => {
+          const num = Number.parseInt(match)
+          return isNaN(num) ? match : numberToWords(num)
         })
 
-        if (response.ok) {
-          const data = await response.json()
-          script = data.choices[0].message.content.trim()
+      return NextResponse.json({
+        script: cleanedScript,
+        method: "OpenAI",
+      })
+    } catch (aiError) {
+      console.warn("OpenAI failed, using fallback:", aiError)
 
-          // Clean up any abbreviations that might slip through
-          script = script
-            .replace(/\bBR\b/g, "bedrooms")
-            .replace(/\bBA\b/g, "bathrooms")
-            .replace(/\bsqft\b/g, "square feet")
-            .replace(/\bSQ FT\b/g, "square feet")
-            .replace(/\d+/g, (match) => numberToWords(Number.parseInt(match)))
+      // Fallback template script with proper pronunciation
+      let fallbackScript = `Stop scrolling! This property is about to blow your mind!
 
-          return NextResponse.json({
-            script,
-            method: "OpenAI",
-          })
-        }
-      } catch (error) {
-        console.warn("OpenAI script generation failed:", error)
-      }
-    }
+Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
 
-    // Fallback template script
-    script = `Stop scrolling! This property is about to blow your mind!
-
-Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${sqft.toLocaleString()} square feet of pure luxury!`
-
-    if (propertyDescription?.trim()) {
-      script += `
+      if (propertyDescription && propertyDescription.trim()) {
+        fallbackScript += `
 
 But wait, there's more! ${propertyDescription.trim()}`
+      }
+
+      fallbackScript += `
+
+Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now for a private showing!`
+
+      return NextResponse.json({
+        script: fallbackScript,
+        method: "fallback",
+      })
     }
-
-    script += `
-
-Priced at ${price.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now for a private showing!`
-
-    return NextResponse.json({
-      script,
-      method: "template",
-    })
   } catch (error) {
     console.error("Script generation error:", error)
     return NextResponse.json(
       {
         error: "Script generation failed",
-        details: error instanceof Error ? error.message : String(error),
+        details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )

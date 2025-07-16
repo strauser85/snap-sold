@@ -20,14 +20,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "File too large (max 10MB)" }, { status: 400 })
     }
 
-    console.log("📤 Uploading image to Vercel Blob...")
-
     // Upload to Vercel Blob
-    const blob = await put(`property-${Date.now()}-${file.name}`, file, {
+    const blob = await put(`images/${Date.now()}-${file.name}`, file, {
       access: "public",
+      contentType: file.type,
     })
-
-    console.log("✅ Image uploaded successfully:", blob.url)
 
     return NextResponse.json({
       url: blob.url,
@@ -38,8 +35,8 @@ export async function POST(request: NextRequest) {
     console.error("Image upload error:", error)
     return NextResponse.json(
       {
-        error: "Image upload failed",
-        details: error instanceof Error ? error.message : String(error),
+        error: "Upload failed",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )

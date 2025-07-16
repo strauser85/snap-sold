@@ -85,7 +85,11 @@ export default function VideoGenerator() {
       const oneDigit = num % 10
       return tens[tenDigit] + (oneDigit > 0 ? " " + ones[oneDigit] : "")
     }
-
+    if (num < 1000) {
+      const hundreds = Math.floor(num / 100)
+      const remainder = num % 100
+      return ones[hundreds] + " hundred" + (remainder > 0 ? " " + numberToWords(remainder) : "")
+    }
     return num.toString()
   }
 
@@ -225,19 +229,19 @@ export default function VideoGenerator() {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
       // Fallback script with proper word formatting
-      const bedroomsText =
-        Number(bedrooms) === 1
-          ? `${numberToWords(Number(bedrooms))} bedroom`
-          : `${numberToWords(Number(bedrooms))} bedrooms`
+      const safePrice = Number(price) || 0
+      const safeBedrooms = Number(bedrooms) || 0
+      const safeBathrooms = Number(bathrooms) || 0
+      const safeSqft = Number(sqft) || 0
 
+      const bedroomsText =
+        safeBedrooms === 1 ? `${numberToWords(safeBedrooms)} bedroom` : `${numberToWords(safeBedrooms)} bedrooms`
       const bathroomsText =
-        Number(bathrooms) === 1
-          ? `${numberToWords(Number(bathrooms))} bathroom`
-          : `${numberToWords(Number(bathrooms))} bathrooms`
+        safeBathrooms === 1 ? `${numberToWords(safeBathrooms)} bathroom` : `${numberToWords(safeBathrooms)} bathrooms`
 
       let basicScript = `Stop scrolling! This property is about to blow your mind!
 
-Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
+Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
 
       if (propertyDescription.trim()) {
         basicScript += `
@@ -247,7 +251,7 @@ But wait, there's more! ${propertyDescription.trim()}`
 
       basicScript += `
 
-Priced at ${Number(price).toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now!`
+Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now!`
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
@@ -266,62 +270,97 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
     })
   }, [])
 
-  // Generate key feature captions only - FIXED NULL SAFETY
+  // FIXED CAPTION GENERATION - NO MORE UNDEFINED ERRORS
   const generateKeyFeatureCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
-    // Safely convert numbers to words for captions with null checks
-    const safeAddress = address || "Property"
-    const safeBedrooms = bedrooms ? Number(bedrooms) : 0
-    const safeBathrooms = bathrooms ? Number(bathrooms) : 0
-    const safeSqft = sqft ? Number(sqft) : 0
-    const safePrice = price ? Number(price) : 0
+    try {
+      // Completely safe value extraction with defaults
+      const safeAddress = (address && typeof address === "string" && address.trim()) || "Property"
+      const safePrice = price && !isNaN(Number(price)) && Number(price) > 0 ? Number(price) : 0
+      const safeBedrooms = bedrooms && !isNaN(Number(bedrooms)) && Number(bedrooms) > 0 ? Number(bedrooms) : 0
+      const safeBathrooms = bathrooms && !isNaN(Number(bathrooms)) && Number(bathrooms) > 0 ? Number(bathrooms) : 0
+      const safeSqft = sqft && !isNaN(Number(sqft)) && Number(sqft) > 0 ? Number(sqft) : 0
 
-    const bedroomsWord = safeBedrooms > 0 ? numberToWords(safeBedrooms).toUpperCase() : "UNKNOWN"
-    const bathroomsWord = safeBathrooms > 0 ? numberToWords(safeBathrooms).toUpperCase() : "UNKNOWN"
+      // Only create captions if we have valid data
+      if (safeBedrooms > 0 && safeBathrooms > 0 && safeSqft > 0 && safePrice > 0) {
+        const bedroomsWord = numberToWords(safeBedrooms).toUpperCase()
+        const bathroomsWord = numberToWords(safeBathrooms).toUpperCase()
 
-    // Key features to highlight with safe string operations
-    const features = [
-      { text: `${bedroomsWord} BEDROOMS`, type: "feature" as const, timing: 0.15 },
-      { text: `${bathroomsWord} BATHROOMS`, type: "feature" as const, timing: 0.25 },
-      { text: `${safeSqft.toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
-      { text: `$${safePrice.toLocaleString()}`, type: "price" as const, timing: 0.65 },
-      {
-        text: safeAddress.includes(",") ? safeAddress.split(",")[0].toUpperCase() : safeAddress.toUpperCase(),
-        type: "location" as const,
-        timing: 0.75,
-      },
-    ]
+        // Create feature captions with safe timing
+        const features = [
+          { text: `${bedroomsWord} BEDROOMS`, type: "feature" as const, timing: 0.15 },
+          { text: `${bathroomsWord} BATHROOMS`, type: "feature" as const, timing: 0.25 },
+          { text: `${safeSqft.toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
+          { text: `$${safePrice.toLocaleString()}`, type: "price" as const, timing: 0.65 },
+        ]
 
-    // Add property description highlights if available
-    if (propertyDescription && propertyDescription.trim()) {
-      const highlights = propertyDescription
-        .split(/[,.!]/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 5 && s.length < 30)
-        .slice(0, 2) // Max 2 additional highlights
+        // Add location caption safely
+        try {
+          const locationText = safeAddress.includes(",")
+            ? safeAddress.split(",")[0].trim().toUpperCase()
+            : safeAddress.toUpperCase()
 
-      highlights.forEach((highlight, index) => {
-        features.push({
-          text: highlight.toUpperCase(),
-          type: "amenity" as const,
-          timing: 0.45 + index * 0.1,
+          if (locationText && locationText.length > 0) {
+            features.push({
+              text: locationText,
+              type: "location" as const,
+              timing: 0.75,
+            })
+          }
+        } catch (locationError) {
+          console.warn("Location processing error:", locationError)
+        }
+
+        // Add property description highlights safely
+        if (propertyDescription && typeof propertyDescription === "string" && propertyDescription.trim()) {
+          try {
+            const highlights = propertyDescription
+              .split(/[,.!]/)
+              .map((s) => s.trim())
+              .filter((s) => s && s.length > 5 && s.length < 30)
+              .slice(0, 2)
+
+            highlights.forEach((highlight, index) => {
+              if (highlight && typeof highlight === "string") {
+                features.push({
+                  text: highlight.toUpperCase(),
+                  type: "amenity" as const,
+                  timing: 0.45 + index * 0.1,
+                })
+              }
+            })
+          } catch (descError) {
+            console.warn("Description processing error:", descError)
+          }
+        }
+
+        // Convert features to captions with safe timing
+        features.forEach((feature) => {
+          try {
+            if (feature.text && typeof feature.text === "string" && feature.text.length > 0) {
+              const startTime = Math.max(0, duration * feature.timing)
+              const endTime = Math.min(duration - 0.5, startTime + 2.5)
+
+              if (startTime < endTime) {
+                captions.push({
+                  text: feature.text,
+                  startTime,
+                  endTime,
+                  type: feature.type,
+                })
+              }
+            }
+          } catch (featureError) {
+            console.warn("Feature processing error:", feature, featureError)
+          }
         })
-      })
+      }
+    } catch (error) {
+      console.error("Caption generation error:", error)
     }
 
-    features.forEach((feature, index) => {
-      const startTime = duration * feature.timing
-      const endTime = Math.min(startTime + 2.5, duration - 0.5) // 2.5 second display
-
-      captions.push({
-        text: feature.text,
-        startTime,
-        endTime,
-        type: feature.type,
-      })
-    })
-
+    console.log(`✅ Generated ${captions.length} captions:`, captions)
     return captions
   }
 
@@ -356,6 +395,8 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
 
       // Step 1: Generate audio (0-15%)
       setProgress(5)
+      console.log("🎵 Generating Rachel voice audio...")
+
       const audioResponse = await fetch("/api/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -368,14 +409,17 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
       }
 
       const { audioUrl, duration } = await audioResponse.json()
-      console.log("🎵 Audio generated, duration:", duration)
+      console.log(`✅ Audio generated: ${audioUrl}, duration: ${duration}s`)
       setProgress(15)
 
-      // Step 2: Generate key feature captions (15-20%)
+      // Step 2: Generate FIXED captions (15-20%)
+      console.log("📝 Generating fixed captions...")
       const captions = generateKeyFeatureCaptions(duration)
+      console.log(`✅ Generated ${captions.length} captions`)
       setProgress(20)
 
       // Step 3: Load images (20-35%)
+      console.log("🖼️ Loading images...")
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
       const loadedImages: HTMLImageElement[] = []
 
@@ -393,35 +437,48 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
         throw new Error("No images could be loaded")
       }
 
+      console.log(`✅ Loaded ${loadedImages.length} images`)
       setProgress(35)
 
-      // Step 4: Setup audio element (35-40%)
+      // Step 4: Setup audio element - NO PREVIEW PLAYING (35-40%)
+      console.log("🔧 Setting up audio element...")
       audio.src = audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
       audio.volume = 1.0
-      audio.muted = false // We need to hear it to record it
+      audio.muted = true // MUTED TO PREVENT PREVIEW PLAYING
+      audio.loop = false
+      audio.autoplay = false // NO AUTOPLAY
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error("Audio loading timeout"))
         }, 10000)
 
-        audio.oncanplaythrough = () => {
+        const onCanPlay = () => {
           clearTimeout(timeout)
+          audio.removeEventListener("canplaythrough", onCanPlay)
+          audio.removeEventListener("error", onError)
+          console.log("✅ Audio loaded and ready (no preview playing)")
           resolve()
         }
-        audio.onerror = () => {
+
+        const onError = () => {
           clearTimeout(timeout)
+          audio.removeEventListener("canplaythrough", onCanPlay)
+          audio.removeEventListener("error", onError)
           reject(new Error("Audio loading failed"))
         }
+
+        audio.addEventListener("canplaythrough", onCanPlay)
+        audio.addEventListener("error", onError)
         audio.load()
       })
 
       setProgress(40)
 
-      // Step 5: Setup recording with PROPER AUDIO CAPTURE (40-45%)
-      console.log("🎬 Setting up recording...")
+      // Step 5: Setup recording with FIXED AUDIO CAPTURE (40-45%)
+      console.log("🎬 Setting up recording with fixed audio...")
 
       // Create audio context for proper audio capture
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -436,8 +493,8 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
 
       // Connect audio source to destination (this captures the audio)
       audioSource.connect(audioDestination)
-      // Also connect to speakers so we can hear it
-      audioSource.connect(audioContext.destination)
+      // DO NOT connect to speakers to prevent preview playing
+      // audioSource.connect(audioContext.destination) // REMOVED
 
       // Get canvas stream
       const canvasStream = canvas.captureStream(30)
@@ -470,7 +527,7 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
       const chunks: Blob[] = []
       setProgress(45)
 
-      // Step 6: Record video with audio (45-75%)
+      // Step 6: Record video with FIXED audio sync (45-75%)
       await new Promise<void>((resolve, reject) => {
         mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
@@ -494,7 +551,7 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
             }
 
             const webmBlob = new Blob(chunks, { type: "video/webm" })
-            console.log("📦 WebM blob size:", webmBlob.size)
+            console.log(`📦 WebM blob size: ${webmBlob.size} bytes`)
             setProgress(75)
 
             // Step 7: Convert WebM to MP4 (75-95%)
@@ -554,8 +611,9 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
         console.log("🎬 Starting recording...")
         mediaRecorder.start(100)
 
-        // Start audio playback
+        // Start audio playback - MUTED SO NO PREVIEW PLAYS
         audio.currentTime = 0
+        audio.muted = false // Unmute for recording but not connected to speakers
         audio.play().catch(console.error)
 
         const startTime = Date.now()
@@ -576,10 +634,15 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
           // Calculate current image
           const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-          // Find current caption
-          const currentCaption = captions.find(
-            (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
-          )
+          // Find current caption with SAFE lookup
+          let currentCaption: Caption | undefined
+          try {
+            currentCaption = captions.find(
+              (caption) => caption && elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
+            )
+          } catch (captionError) {
+            console.warn("Caption lookup error:", captionError)
+          }
 
           // Draw current image
           const img = loadedImages[imageIndex]
@@ -597,67 +660,83 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw key feature captions only
-            if (currentCaption) {
-              const fontSize = Math.floor(canvas.width * 0.09)
-              ctx.font = `900 ${fontSize}px Arial, sans-serif`
-              ctx.textAlign = "center"
+            // Draw FIXED captions
+            if (currentCaption && currentCaption.text && typeof currentCaption.text === "string") {
+              try {
+                const fontSize = Math.floor(canvas.width * 0.09)
+                ctx.font = `900 ${fontSize}px Arial, sans-serif`
+                ctx.textAlign = "center"
 
-              // Caption styling based on type
-              let captionColor = "#FFFF00" // Default yellow
-              if (currentCaption.type === "price") captionColor = "#00FF00" // Green for price
-              if (currentCaption.type === "location") captionColor = "#FF6B6B" // Red for location
-              if (currentCaption.type === "amenity") captionColor = "#4ECDC4" // Teal for amenities
+                // Caption styling based on type
+                let captionColor = "#FFFF00" // Default yellow
+                if (currentCaption.type === "price") captionColor = "#00FF00" // Green for price
+                if (currentCaption.type === "location") captionColor = "#FF6B6B" // Red for location
+                if (currentCaption.type === "amenity") captionColor = "#4ECDC4" // Teal for amenities
 
-              const words = currentCaption.text.split(" ")
-              const lines: string[] = []
+                const words = currentCaption.text.split(" ").filter((word) => word && word.length > 0)
+                const lines: string[] = []
 
-              // Break into lines (max 2 words per line for impact)
-              for (let i = 0; i < words.length; i += 2) {
-                lines.push(words.slice(i, i + 2).join(" "))
+                // Break into lines (max 2 words per line for impact)
+                for (let i = 0; i < words.length; i += 2) {
+                  const line = words.slice(i, i + 2).join(" ")
+                  if (line && line.trim().length > 0) {
+                    lines.push(line)
+                  }
+                }
+
+                const lineHeight = fontSize * 1.2
+                const startY = canvas.height * 0.7
+
+                lines.forEach((line, lineIndex) => {
+                  if (line && typeof line === "string" && line.trim().length > 0) {
+                    const y = startY + lineIndex * lineHeight
+
+                    // Black outline for readability
+                    ctx.strokeStyle = "#000000"
+                    ctx.lineWidth = Math.floor(fontSize * 0.15)
+                    ctx.strokeText(line, canvas.width / 2, y)
+
+                    // Colored text
+                    ctx.fillStyle = captionColor
+                    ctx.fillText(line, canvas.width / 2, y)
+                  }
+                })
+              } catch (captionDrawError) {
+                console.warn("Caption drawing error:", captionDrawError)
               }
-
-              const lineHeight = fontSize * 1.2
-              const startY = canvas.height * 0.7
-
-              lines.forEach((line, lineIndex) => {
-                const y = startY + lineIndex * lineHeight
-
-                // Black outline for readability
-                ctx.strokeStyle = "#000000"
-                ctx.lineWidth = Math.floor(fontSize * 0.15)
-                ctx.strokeText(line, canvas.width / 2, y)
-
-                // Colored text
-                ctx.fillStyle = captionColor
-                ctx.fillText(line, canvas.width / 2, y)
-              })
             }
 
-            // Property info overlay (always visible) - using full words with null safety
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
-            ctx.fillRect(0, 0, canvas.width, 80)
+            // Property info overlay with COMPLETE null safety
+            try {
+              ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
+              ctx.fillRect(0, 0, canvas.width, 80)
 
-            ctx.fillStyle = "#FFFFFF"
-            ctx.font = "bold 16px Arial"
-            ctx.textAlign = "left"
-            ctx.fillText(address || "Property", 15, 25)
+              ctx.fillStyle = "#FFFFFF"
+              ctx.font = "bold 16px Arial"
+              ctx.textAlign = "left"
+              const displayAddress = (address && typeof address === "string" && address.trim()) || "Property"
+              ctx.fillText(displayAddress, 15, 25)
 
-            ctx.fillStyle = "#FFD700"
-            ctx.font = "bold 14px Arial"
-            ctx.fillText(`$${Number(price || 0).toLocaleString()}`, 15, 45)
+              ctx.fillStyle = "#FFD700"
+              ctx.font = "bold 14px Arial"
+              const displayPrice = price && !isNaN(Number(price)) && Number(price) > 0 ? Number(price) : 0
+              ctx.fillText(`$${displayPrice.toLocaleString()}`, 15, 45)
 
-            ctx.fillStyle = "#FFFFFF"
-            ctx.font = "12px Arial"
-            const safeBedrooms = Number(bedrooms || 0)
-            const safeBathrooms = Number(bathrooms || 0)
-            const bedroomsText = safeBedrooms === 1 ? "bedroom" : "bedrooms"
-            const bathroomsText = safeBathrooms === 1 ? "bathroom" : "bathrooms"
-            ctx.fillText(
-              `${safeBedrooms} ${bedroomsText} • ${safeBathrooms} ${bathroomsText} • ${Number(sqft || 0).toLocaleString()} sqft`,
-              15,
-              65,
-            )
+              ctx.fillStyle = "#FFFFFF"
+              ctx.font = "12px Arial"
+              const safeBedrooms = bedrooms && isNaN(Number(bedrooms)) ? Number(bedrooms) : 0
+              const safeBathrooms = bathrooms && isNaN(Number(bathrooms)) ? Number(bathrooms) : 0
+              const safeSqft = sqft && isNaN(Number(sqft)) ? Number(sqft) : 0
+              const bedroomsText = safeBedrooms === 1 ? "bedroom" : "bedrooms"
+              const bathroomsText = safeBathrooms === 1 ? "bathroom" : "bathrooms"
+              ctx.fillText(
+                `${safeBedrooms} ${bedroomsText} • ${safeBathrooms} ${bathroomsText} • ${safeSqft.toLocaleString()} sqft`,
+                15,
+                65,
+              )
+            } catch (overlayError) {
+              console.warn("Overlay drawing error:", overlayError)
+            }
           }
 
           // Update progress
@@ -672,6 +751,7 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
 
       setProgress(100)
       setIsGenerating(false)
+      console.log("🎉 Video generation completed successfully!")
     } catch (error) {
       console.error("❌ Video generation error:", error)
       setError(error instanceof Error ? error.message : "Video generation failed")
