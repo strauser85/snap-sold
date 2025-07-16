@@ -1,8 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { put } from "@vercel/blob"
 
-export const maxDuration = 30
-
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -12,26 +10,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
 
-    console.log("📤 Uploading image:", file.name, "Size:", file.size)
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      return NextResponse.json({ error: "File must be an image" }, { status: 400 })
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "File too large (max 10MB)" }, { status: 400 })
+    }
 
     // Upload to Vercel Blob
-    const blob = await put(file.name, file, {
+    const blob = await put(`property-${Date.now()}-${file.name}`, file, {
       access: "public",
+      contentType: file.type,
     })
-
-    console.log("✅ Image uploaded:", blob.url)
 
     return NextResponse.json({
       url: blob.url,
-      size: file.size,
-      name: file.name,
+      success: true,
     })
   } catch (error) {
-    console.error("❌ Image upload error:", error)
+    console.error("Image upload error:", error)
     return NextResponse.json(
       {
-        error: "Failed to upload image",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: "Image upload failed",
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
     )

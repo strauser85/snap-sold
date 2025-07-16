@@ -1,39 +1,27 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export const maxDuration = 60
-
 export async function POST(request: NextRequest) {
   try {
+    if (!process.env.FAL_KEY) {
+      return NextResponse.json({ error: "FAL_KEY not configured" }, { status: 500 })
+    }
+
     const formData = await request.formData()
     const webmFile = formData.get("webm") as File
 
     if (!webmFile) {
-      return NextResponse.json({ error: "WebM file is required" }, { status: 400 })
+      return NextResponse.json({ error: "No WebM file provided" }, { status: 400 })
     }
 
-    console.log("🎬 Converting WebM to MP4...")
-    console.log("WebM file size:", webmFile.size)
+    console.log("🔄 Converting WebM to MP4 using Fal AI...")
 
-    if (!process.env.FAL_KEY) {
-      console.error("❌ FAL_KEY not configured")
-      return NextResponse.json({ error: "FAL_KEY not configured" }, { status: 500 })
-    }
-
-    // Convert File to ArrayBuffer then to Uint8Array
+    // Convert file to base64 data URL
     const arrayBuffer = await webmFile.arrayBuffer()
     const uint8Array = new Uint8Array(arrayBuffer)
+    const base64String = btoa(String.fromCharCode(...uint8Array))
+    const dataUrl = `data:video/webm;base64,${base64String}`
 
-    // Convert to base64
-    let binary = ""
-    const len = uint8Array.byteLength
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(uint8Array[i])
-    }
-    const base64Data = btoa(binary)
-
-    console.log("📦 Base64 data length:", base64Data.length)
-
-    // Use Fal AI FFmpeg for conversion
+    // Use Fal AI for video conversion
     const response = await fetch("https://fal.run/fal-ai/ffmpeg", {
       method: "POST",
       headers: {
@@ -41,9 +29,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        input_data: base64Data,
-        input_format: "webm",
-        output_format: "mp4",
+        video_url: dataUrl,
         ffmpeg_args: [
           "-i",
           "input.webm",
@@ -57,8 +43,6 @@ export async function POST(request: NextRequest) {
           "23",
           "-movflags",
           "+faststart",
-          "-f",
-          "mp4",
           "output.mp4",
         ],
       }),
@@ -66,33 +50,31 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("❌ Fal AI FFmpeg error:", errorText)
-      return NextResponse.json({ error: `FFmpeg conversion failed: ${errorText}` }, { status: 500 })
+      console.error("Fal AI conversion error:", response.status, errorText)
+      throw new Error(`Conversion failed: ${response.status}`)
     }
 
     const result = await response.json()
-    console.log("✅ Fal AI conversion result keys:", Object.keys(result))
+    console.log("✅ MP4 conversion successful")
 
-    // Check for different possible response formats
-    const outputUrl = result.output_url || result.url || result.output_data || result.data
+    // The result might have different property names, check common ones
+    const mp4Url = result.video_url || result.output_url || result.url || result.video
 
-    if (!outputUrl) {
-      console.error("❌ No output URL in result:", result)
-      return NextResponse.json({ error: "No output URL from conversion" }, { status: 500 })
+    if (!mp4Url) {
+      console.error("No MP4 URL in response:", result)
+      throw new Error("No MP4 URL returned from conversion")
     }
 
-    console.log("✅ MP4 conversion successful:", outputUrl)
-
     return NextResponse.json({
+      mp4Url,
       success: true,
-      mp4Url: outputUrl,
     })
   } catch (error) {
-    console.error("❌ MP4 conversion error:", error)
+    console.error("MP4 conversion error:", error)
     return NextResponse.json(
       {
         error: "MP4 conversion failed",
-        details: error instanceof Error ? error.message : "Unknown error",
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
     )

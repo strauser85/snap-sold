@@ -1,23 +1,23 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { put } from "@vercel/blob"
 
-export const maxDuration = 30
+interface AudioRequest {
+  script: string
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const { script } = await request.json()
+    const { script }: AudioRequest = await request.json()
 
-    if (!script) {
+    if (!script?.trim()) {
       return NextResponse.json({ error: "Script is required" }, { status: 400 })
     }
-
-    console.log("🎵 Generating audio for script:", script.substring(0, 100) + "...")
 
     if (!process.env.ELEVENLABS_API_KEY) {
       return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
     }
 
-    // Generate audio using ElevenLabs
+    console.log("🎵 Generating audio with ElevenLabs...")
+
     const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
       method: "POST",
       headers: {
@@ -30,8 +30,8 @@ export async function POST(request: NextRequest) {
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.5,
+          similarity_boost: 0.8,
+          style: 0.2,
           use_speaker_boost: true,
         },
       }),
@@ -39,37 +39,37 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("❌ ElevenLabs API error:", errorText)
-      return NextResponse.json({ error: "Audio generation failed", details: errorText }, { status: response.status })
+      console.error("ElevenLabs API error:", response.status, errorText)
+      throw new Error(`ElevenLabs API error: ${response.status}`)
     }
 
-    // Get audio data
     const audioBuffer = await response.arrayBuffer()
     console.log("✅ Audio generated, size:", audioBuffer.byteLength)
 
     // Upload to Vercel Blob
-    const audioBlob = await put(`audio-${Date.now()}.mp3`, audioBuffer, {
+    const { put } = await import("@vercel/blob")
+    const blob = await put(`audio-${Date.now()}.mp3`, audioBuffer, {
       access: "public",
       contentType: "audio/mpeg",
     })
 
-    console.log("✅ Audio uploaded to blob:", audioBlob.url)
-
-    // Estimate duration (rough calculation: ~150 words per minute)
+    // Get audio duration (estimate based on script length)
+    const wordsPerMinute = 150
     const wordCount = script.split(" ").length
-    const estimatedDuration = Math.max(5, (wordCount / 150) * 60) // At least 5 seconds
+    const estimatedDuration = Math.max(10, (wordCount / wordsPerMinute) * 60)
+
+    console.log(`🎵 Audio uploaded: ${blob.url}, estimated duration: ${estimatedDuration}s`)
 
     return NextResponse.json({
-      audioUrl: audioBlob.url,
+      audioUrl: blob.url,
       duration: estimatedDuration,
-      wordCount,
     })
   } catch (error) {
-    console.error("❌ Audio generation error:", error)
+    console.error("Audio generation error:", error)
     return NextResponse.json(
       {
-        error: "Failed to generate audio",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: "Audio generation failed",
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
     )

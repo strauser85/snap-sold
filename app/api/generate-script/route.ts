@@ -1,21 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { generateText } from "ai"
-import { openai } from "@ai-sdk/openai"
 
-export const maxDuration = 30
-
-interface PropertyData {
+interface ScriptRequest {
   address: string
   price: number
   bedrooms: number
   bathrooms: number
   sqft: number
   propertyDescription?: string
-  imageCount?: number
+  imageCount: number
 }
 
 // Helper function to convert numbers to words
-function numberToWords(num: number): string {
+const numberToWords = (num: number): string => {
   const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
   const teens = [
     "ten",
@@ -40,147 +36,117 @@ function numberToWords(num: number): string {
     return tens[tenDigit] + (oneDigit > 0 ? " " + ones[oneDigit] : "")
   }
 
-  // For larger numbers, just return the string representation
   return num.toString()
-}
-
-// Helper function to format bathroom count for speech
-function formatBathrooms(bathrooms: number): string {
-  if (bathrooms === Math.floor(bathrooms)) {
-    // Whole number
-    const word = numberToWords(bathrooms)
-    return bathrooms === 1 ? `${word} bathroom` : `${word} bathrooms`
-  } else {
-    // Decimal (like 2.5)
-    const whole = Math.floor(bathrooms)
-    const decimal = bathrooms - whole
-    if (decimal === 0.5) {
-      const wholeWord = numberToWords(whole)
-      return `${wholeWord} and a half bathrooms`
-    } else {
-      return `${bathrooms} bathrooms`
-    }
-  }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const propertyData: PropertyData = await request.json()
-    console.log("🏠 Generating script for:", propertyData.address)
+    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount }: ScriptRequest =
+      await request.json()
 
-    // Validate required fields
-    if (
-      !propertyData.address ||
-      !propertyData.price ||
-      !propertyData.bedrooms ||
-      !propertyData.bathrooms ||
-      !propertyData.sqft
-    ) {
-      return NextResponse.json({ error: "Missing required property data" }, { status: 400 })
+    if (!address || !price || !bedrooms || !bathrooms || !sqft) {
+      return NextResponse.json({ error: "Missing required property details" }, { status: 400 })
     }
+
+    // Convert numbers to words for better pronunciation
+    const bedroomsText = bedrooms === 1 ? `${numberToWords(bedrooms)} bedroom` : `${numberToWords(bedrooms)} bedrooms`
+    const bathroomsText =
+      bathrooms === 1 ? `${numberToWords(bathrooms)} bathroom` : `${numberToWords(bathrooms)} bathrooms`
 
     let script = ""
-    let method = ""
 
-    // Convert numbers to words for better speech
-    const bedroomsText =
-      propertyData.bedrooms === 1
-        ? `${numberToWords(propertyData.bedrooms)} bedroom`
-        : `${numberToWords(propertyData.bedrooms)} bedrooms`
+    // Try OpenAI first if API key is available
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "system",
+                content: `You are a viral TikTok real estate content creator. Create engaging, energetic scripts that grab attention immediately.
 
-    const bathroomsText = formatBathrooms(propertyData.bathrooms)
-    const sqftText = propertyData.sqft.toLocaleString()
-    const priceText = propertyData.price.toLocaleString()
+CRITICAL RULES:
+- NO abbreviations whatsoever (never use BR, BA, sqft, etc.)
+- Always spell out numbers as words (1 = one, 2 = two, 3 = three, etc.)
+- Use full words: "bedrooms" not "BR", "bathrooms" not "BA", "square feet" not "sqft"
+- Keep it under 45 seconds when spoken
+- Start with a hook that stops scrolling
+- Use excitement and urgency
+- End with a strong call to action
+- Make it sound natural when spoken aloud`,
+              },
+              {
+                role: "user",
+                content: `Create a viral TikTok script for this property:
+- Address: ${address}
+- Price: $${price.toLocaleString()}
+- ${bedroomsText}
+- ${bathroomsText}  
+- ${sqft.toLocaleString()} square feet
+${propertyDescription ? `- Special features: ${propertyDescription}` : ""}
+- ${imageCount} photos available
 
-    // Try OpenAI first
-    try {
-      console.log("🤖 Attempting OpenAI script generation...")
+Remember: NO abbreviations, spell out all numbers as words, make it exciting!`,
+              },
+            ],
+            max_tokens: 400,
+            temperature: 0.8,
+          }),
+        })
 
-      const prompt = `Create an engaging 30-45 second TikTok script for a real estate listing. Make it energetic, attention-grabbing, and perfect for a female voice (Rachel from ElevenLabs).
+        if (response.ok) {
+          const data = await response.json()
+          script = data.choices[0].message.content.trim()
 
-Property Details:
-- Address: ${propertyData.address}
-- Price: $${priceText}
-- Bedrooms: ${bedroomsText}
-- Bathrooms: ${bathroomsText}
-- Square Feet: ${sqftText} square feet
-${propertyData.propertyDescription ? `- Description: ${propertyData.propertyDescription}` : ""}
-${propertyData.imageCount ? `- Number of photos: ${propertyData.imageCount}` : ""}
+          // Clean up any abbreviations that might slip through
+          script = script
+            .replace(/\bBR\b/g, "bedrooms")
+            .replace(/\bBA\b/g, "bathrooms")
+            .replace(/\bsqft\b/g, "square feet")
+            .replace(/\bSQ FT\b/g, "square feet")
+            .replace(/\d+/g, (match) => numberToWords(Number.parseInt(match)))
 
-CRITICAL REQUIREMENTS:
-- Write ALL numbers as words (one, two, three, NOT 1, 2, 3)
-- Use full words, NO abbreviations (bedroom NOT BR, bathroom NOT BA, square feet NOT sqft)
-- Start with an attention-grabbing hook
-- Mention key features and price using full words
-- Create urgency and excitement
-- End with a clear call-to-action
-- Keep it conversational and energetic
-- Perfect for TikTok/Instagram Reels
-- 30-45 seconds when spoken aloud
-- NO emojis or special characters (they cause audio generation issues)
-- NO abbreviations whatsoever
-
-Write ONLY the script text, nothing else.`
-
-      const result = await generateText({
-        model: openai("gpt-4o-mini"),
-        prompt,
-        maxTokens: 300,
-        temperature: 0.8,
-      })
-
-      script = result.text.trim()
-      method = "OpenAI"
-      console.log("✅ OpenAI script generated successfully")
-    } catch (openaiError) {
-      console.warn("⚠️ OpenAI failed, using fallback template:", openaiError)
-
-      // Fallback template with proper word formatting
-      script = `Stop scrolling! This property is about to blow your mind!
-
-Welcome to ${propertyData.address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${sqftText} square feet of pure luxury.
-
-${propertyData.propertyDescription ? `But wait, there's more! ${propertyData.propertyDescription}` : "This home has everything you need and more!"}
-
-And the best part? It's priced at just ${priceText} dollars. This incredible opportunity won't last long!
-
-Don't let this dream home slip away. Message me right now to schedule your private showing. Seriously, do it now!`
-
-      method = "Template"
+          return NextResponse.json({
+            script,
+            method: "OpenAI",
+          })
+        }
+      } catch (error) {
+        console.warn("OpenAI script generation failed:", error)
+      }
     }
 
-    // Clean up the script and remove any abbreviations that might have slipped through
-    script = script
-      .replace(/\bBR\b/g, "bedrooms")
-      .replace(/\bBA\b/g, "bathrooms")
-      .replace(/\bsqft\b/g, "square feet")
-      .replace(/\bsq ft\b/g, "square feet")
-      .replace(/\bft\b/g, "feet")
-      .replace(/\b(\d+)\b/g, (match, num) => {
-        const number = Number.parseInt(num)
-        if (number >= 0 && number <= 100) {
-          return numberToWords(number)
-        }
-        return match
-      })
-      .replace(/[^\w\s.,!?$-]/g, "") // Remove special characters but keep basic punctuation
-      .replace(/\s+/g, " ")
-      .trim()
+    // Fallback template script
+    script = `Stop scrolling! This property is about to blow your mind!
 
-    console.log(`📝 Generated script (${method}): ${script.length} characters`)
+Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${sqft.toLocaleString()} square feet of pure luxury!`
+
+    if (propertyDescription?.trim()) {
+      script += `
+
+But wait, there's more! ${propertyDescription.trim()}`
+    }
+
+    script += `
+
+Priced at ${price.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now for a private showing!`
 
     return NextResponse.json({
       script,
-      method,
-      length: script.length,
-      estimatedDuration: Math.ceil(script.split(" ").length / 3), // Rough estimate: 3 words per second
+      method: "template",
     })
   } catch (error) {
-    console.error("❌ Script generation error:", error)
+    console.error("Script generation error:", error)
     return NextResponse.json(
       {
-        error: "Failed to generate script",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: "Script generation failed",
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
     )

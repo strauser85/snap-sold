@@ -270,21 +270,29 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
   const generateKeyFeatureCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
-    // Convert numbers to words for captions
-    const bedroomsWord = numberToWords(Number(bedrooms)).toUpperCase()
-    const bathroomsWord = numberToWords(Number(bathrooms)).toUpperCase()
+    // Safely convert numbers to words for captions
+    const bedroomsWord = bedrooms ? numberToWords(Number(bedrooms)).toUpperCase() : "UNKNOWN"
+    const bathroomsWord = bathrooms ? numberToWords(Number(bathrooms)).toUpperCase() : "UNKNOWN"
 
     // Key features to highlight
     const features = [
       { text: `${bedroomsWord} BEDROOMS`, type: "feature" as const, timing: 0.15 },
       { text: `${bathroomsWord} BATHROOMS`, type: "feature" as const, timing: 0.25 },
-      { text: `${Number(sqft).toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
-      { text: `$${Number(price).toLocaleString()}`, type: "price" as const, timing: 0.65 },
-      { text: address.split(",")[0].toUpperCase(), type: "location" as const, timing: 0.75 },
+      { text: `${Number(sqft || 0).toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
+      { text: `$${Number(price || 0).toLocaleString()}`, type: "price" as const, timing: 0.65 },
+      {
+        text: address
+          ? address.includes(",")
+            ? address.split(",")[0].toUpperCase()
+            : address.toUpperCase()
+          : "PROPERTY",
+        type: "location" as const,
+        timing: 0.75,
+      },
     ]
 
     // Add property description highlights if available
-    if (propertyDescription.trim()) {
+    if (propertyDescription?.trim()) {
       const highlights = propertyDescription
         .split(/[,.!]/)
         .map((s) => s.trim())
@@ -631,18 +639,18 @@ Priced at ${Number(price).toLocaleString()} dollars, this property is an incredi
             ctx.fillStyle = "#FFFFFF"
             ctx.font = "bold 16px Arial"
             ctx.textAlign = "left"
-            ctx.fillText(address, 15, 25)
+            ctx.fillText(address || "Property", 15, 25)
 
             ctx.fillStyle = "#FFD700"
             ctx.font = "bold 14px Arial"
-            ctx.fillText(`$${Number(price).toLocaleString()}`, 15, 45)
+            ctx.fillText(`$${Number(price || 0).toLocaleString()}`, 15, 45)
 
             ctx.fillStyle = "#FFFFFF"
             ctx.font = "12px Arial"
-            const bedroomsText = Number(bedrooms) === 1 ? "bedroom" : "bedrooms"
-            const bathroomsText = Number(bathrooms) === 1 ? "bathroom" : "bathrooms"
+            const bedroomsText = Number(bedrooms || 0) === 1 ? "bedroom" : "bedrooms"
+            const bathroomsText = Number(bathrooms || 0) === 1 ? "bathroom" : "bathrooms"
             ctx.fillText(
-              `${bedrooms} ${bedroomsText} • ${bathrooms} ${bathroomsText} • ${Number(sqft).toLocaleString()} sqft`,
+              `${bedrooms || 0} ${bedroomsText} • ${bathrooms || 0} ${bathroomsText} • ${Number(sqft || 0).toLocaleString()} sqft`,
               15,
               65,
             )
