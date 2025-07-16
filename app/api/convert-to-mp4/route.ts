@@ -14,10 +14,24 @@ export async function POST(request: NextRequest) {
     console.log("🎬 Converting WebM to MP4...")
     console.log("WebM file size:", webmFile.size)
 
-    // Convert File to ArrayBuffer then to base64
+    if (!process.env.FAL_KEY) {
+      console.error("❌ FAL_KEY not configured")
+      return NextResponse.json({ error: "FAL_KEY not configured" }, { status: 500 })
+    }
+
+    // Convert File to ArrayBuffer then to Uint8Array
     const arrayBuffer = await webmFile.arrayBuffer()
-    const base64Data = Buffer.from(arrayBuffer).toString("base64")
-    const dataUrl = `data:video/webm;base64,${base64Data}`
+    const uint8Array = new Uint8Array(arrayBuffer)
+
+    // Convert to base64
+    let binary = ""
+    const len = uint8Array.byteLength
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(uint8Array[i])
+    }
+    const base64Data = btoa(binary)
+
+    console.log("📦 Base64 data length:", base64Data.length)
 
     // Use Fal AI FFmpeg for conversion
     const response = await fetch("https://fal.run/fal-ai/ffmpeg", {
@@ -27,7 +41,9 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        input_url: dataUrl,
+        input_data: base64Data,
+        input_format: "webm",
+        output_format: "mp4",
         ffmpeg_args: [
           "-i",
           "input.webm",
@@ -36,7 +52,7 @@ export async function POST(request: NextRequest) {
           "-c:a",
           "aac",
           "-preset",
-          "medium",
+          "fast",
           "-crf",
           "23",
           "-movflags",
@@ -55,15 +71,21 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await response.json()
-    console.log("✅ Fal AI conversion result:", result)
+    console.log("✅ Fal AI conversion result keys:", Object.keys(result))
 
-    if (!result.output_url) {
+    // Check for different possible response formats
+    const outputUrl = result.output_url || result.url || result.output_data || result.data
+
+    if (!outputUrl) {
+      console.error("❌ No output URL in result:", result)
       return NextResponse.json({ error: "No output URL from conversion" }, { status: 500 })
     }
 
+    console.log("✅ MP4 conversion successful:", outputUrl)
+
     return NextResponse.json({
       success: true,
-      mp4Url: result.output_url,
+      mp4Url: outputUrl,
     })
   } catch (error) {
     console.error("❌ MP4 conversion error:", error)

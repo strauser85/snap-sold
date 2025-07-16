@@ -14,6 +14,55 @@ interface PropertyData {
   imageCount?: number
 }
 
+// Helper function to convert numbers to words
+function numberToWords(num: number): string {
+  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+  const teens = [
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+  ]
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+  if (num === 0) return "zero"
+  if (num < 10) return ones[num]
+  if (num < 20) return teens[num - 10]
+  if (num < 100) {
+    const tenDigit = Math.floor(num / 10)
+    const oneDigit = num % 10
+    return tens[tenDigit] + (oneDigit > 0 ? " " + ones[oneDigit] : "")
+  }
+
+  // For larger numbers, just return the string representation
+  return num.toString()
+}
+
+// Helper function to format bathroom count for speech
+function formatBathrooms(bathrooms: number): string {
+  if (bathrooms === Math.floor(bathrooms)) {
+    // Whole number
+    const word = numberToWords(bathrooms)
+    return bathrooms === 1 ? `${word} bathroom` : `${word} bathrooms`
+  } else {
+    // Decimal (like 2.5)
+    const whole = Math.floor(bathrooms)
+    const decimal = bathrooms - whole
+    if (decimal === 0.5) {
+      const wholeWord = numberToWords(whole)
+      return `${wholeWord} and a half bathrooms`
+    } else {
+      return `${bathrooms} bathrooms`
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const propertyData: PropertyData = await request.json()
@@ -33,6 +82,16 @@ export async function POST(request: NextRequest) {
     let script = ""
     let method = ""
 
+    // Convert numbers to words for better speech
+    const bedroomsText =
+      propertyData.bedrooms === 1
+        ? `${numberToWords(propertyData.bedrooms)} bedroom`
+        : `${numberToWords(propertyData.bedrooms)} bedrooms`
+
+    const bathroomsText = formatBathrooms(propertyData.bathrooms)
+    const sqftText = propertyData.sqft.toLocaleString()
+    const priceText = propertyData.price.toLocaleString()
+
     // Try OpenAI first
     try {
       console.log("🤖 Attempting OpenAI script generation...")
@@ -41,22 +100,25 @@ export async function POST(request: NextRequest) {
 
 Property Details:
 - Address: ${propertyData.address}
-- Price: $${propertyData.price.toLocaleString()}
-- Bedrooms: ${propertyData.bedrooms}
-- Bathrooms: ${propertyData.bathrooms}
-- Square Feet: ${propertyData.sqft.toLocaleString()}
+- Price: $${priceText}
+- Bedrooms: ${bedroomsText}
+- Bathrooms: ${bathroomsText}
+- Square Feet: ${sqftText} square feet
 ${propertyData.propertyDescription ? `- Description: ${propertyData.propertyDescription}` : ""}
 ${propertyData.imageCount ? `- Number of photos: ${propertyData.imageCount}` : ""}
 
-Requirements:
+CRITICAL REQUIREMENTS:
+- Write ALL numbers as words (one, two, three, NOT 1, 2, 3)
+- Use full words, NO abbreviations (bedroom NOT BR, bathroom NOT BA, square feet NOT sqft)
 - Start with an attention-grabbing hook
-- Mention key features and price
+- Mention key features and price using full words
 - Create urgency and excitement
 - End with a clear call-to-action
 - Keep it conversational and energetic
 - Perfect for TikTok/Instagram Reels
 - 30-45 seconds when spoken aloud
 - NO emojis or special characters (they cause audio generation issues)
+- NO abbreviations whatsoever
 
 Write ONLY the script text, nothing else.`
 
@@ -73,25 +135,34 @@ Write ONLY the script text, nothing else.`
     } catch (openaiError) {
       console.warn("⚠️ OpenAI failed, using fallback template:", openaiError)
 
-      // Fallback template
-      const bedroomText = propertyData.bedrooms === 1 ? "1 bedroom" : `${propertyData.bedrooms} bedrooms`
-      const bathroomText = propertyData.bathrooms === 1 ? "1 bathroom" : `${propertyData.bathrooms} bathrooms`
-
+      // Fallback template with proper word formatting
       script = `Stop scrolling! This property is about to blow your mind!
 
-Welcome to ${propertyData.address}! This stunning home features ${bedroomText} and ${bathroomText}, with ${propertyData.sqft.toLocaleString()} square feet of pure luxury.
+Welcome to ${propertyData.address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${sqftText} square feet of pure luxury.
 
 ${propertyData.propertyDescription ? `But wait, there's more! ${propertyData.propertyDescription}` : "This home has everything you need and more!"}
 
-And the best part? It's priced at just ${propertyData.price.toLocaleString()} dollars. This incredible opportunity won't last long!
+And the best part? It's priced at just ${priceText} dollars. This incredible opportunity won't last long!
 
 Don't let this dream home slip away. Message me right now to schedule your private showing. Seriously, do it now!`
 
       method = "Template"
     }
 
-    // Clean up the script
+    // Clean up the script and remove any abbreviations that might have slipped through
     script = script
+      .replace(/\bBR\b/g, "bedrooms")
+      .replace(/\bBA\b/g, "bathrooms")
+      .replace(/\bsqft\b/g, "square feet")
+      .replace(/\bsq ft\b/g, "square feet")
+      .replace(/\bft\b/g, "feet")
+      .replace(/\b(\d+)\b/g, (match, num) => {
+        const number = Number.parseInt(num)
+        if (number >= 0 && number <= 100) {
+          return numberToWords(number)
+        }
+        return match
+      })
       .replace(/[^\w\s.,!?$-]/g, "") // Remove special characters but keep basic punctuation
       .replace(/\s+/g, " ")
       .trim()

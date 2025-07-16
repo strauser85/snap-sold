@@ -60,6 +60,35 @@ export default function VideoGenerator() {
 
   const MAX_IMAGES = 30
 
+  // Helper function to convert numbers to words
+  const numberToWords = (num: number): string => {
+    const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+    const teens = [
+      "ten",
+      "eleven",
+      "twelve",
+      "thirteen",
+      "fourteen",
+      "fifteen",
+      "sixteen",
+      "seventeen",
+      "eighteen",
+      "nineteen",
+    ]
+    const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+    if (num === 0) return "zero"
+    if (num < 10) return ones[num]
+    if (num < 20) return teens[num - 10]
+    if (num < 100) {
+      const tenDigit = Math.floor(num / 10)
+      const oneDigit = num % 10
+      return tens[tenDigit] + (oneDigit > 0 ? " " + ones[oneDigit] : "")
+    }
+
+    return num.toString()
+  }
+
   // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
     return new Promise((resolve) => {
@@ -195,10 +224,20 @@ export default function VideoGenerator() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
-      // Fallback script
-      let basicScript = `Stop scrolling! This property is about to BLOW YOUR MIND!
+      // Fallback script with proper word formatting
+      const bedroomsText =
+        Number(bedrooms) === 1
+          ? `${numberToWords(Number(bedrooms))} bedroom`
+          : `${numberToWords(Number(bedrooms))} bedrooms`
 
-Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
+      const bathroomsText =
+        Number(bathrooms) === 1
+          ? `${numberToWords(Number(bathrooms))} bathroom`
+          : `${numberToWords(Number(bathrooms))} bathrooms`
+
+      let basicScript = `Stop scrolling! This property is about to blow your mind!
+
+Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
 
       if (propertyDescription.trim()) {
         basicScript += `
@@ -208,7 +247,7 @@ But wait, there's more! ${propertyDescription.trim()}`
 
       basicScript += `
 
-Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Don't let this slip away! DM me NOW!`
+Priced at ${Number(price).toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now!`
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
@@ -231,11 +270,15 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
   const generateKeyFeatureCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
+    // Convert numbers to words for captions
+    const bedroomsWord = numberToWords(Number(bedrooms)).toUpperCase()
+    const bathroomsWord = numberToWords(Number(bathrooms)).toUpperCase()
+
     // Key features to highlight
     const features = [
-      { text: `${bedrooms} BEDROOMS`, type: "feature" as const, timing: 0.15 },
-      { text: `${bathrooms} BATHROOMS`, type: "feature" as const, timing: 0.25 },
-      { text: `${Number(sqft).toLocaleString()} SQ FT`, type: "feature" as const, timing: 0.35 },
+      { text: `${bedroomsWord} BEDROOMS`, type: "feature" as const, timing: 0.15 },
+      { text: `${bathroomsWord} BATHROOMS`, type: "feature" as const, timing: 0.25 },
+      { text: `${Number(sqft).toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
       { text: `$${Number(price).toLocaleString()}`, type: "price" as const, timing: 0.65 },
       { text: address.split(",")[0].toUpperCase(), type: "location" as const, timing: 0.75 },
     ]
@@ -479,6 +522,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
             const link = document.createElement("a")
             link.href = mp4Url
             link.download = "property-video.mp4"
+            link.target = "_blank"
             document.body.appendChild(link)
             link.click()
             document.body.removeChild(link)
@@ -580,7 +624,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
               })
             }
 
-            // Property info overlay (always visible)
+            // Property info overlay (always visible) - using full words
             ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
             ctx.fillRect(0, 0, canvas.width, 80)
 
@@ -595,7 +639,13 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
             ctx.fillStyle = "#FFFFFF"
             ctx.font = "12px Arial"
-            ctx.fillText(`${bedrooms}BR • ${bathrooms}BA • ${Number(sqft).toLocaleString()} sqft`, 15, 65)
+            const bedroomsText = Number(bedrooms) === 1 ? "bedroom" : "bedrooms"
+            const bathroomsText = Number(bathrooms) === 1 ? "bathroom" : "bathrooms"
+            ctx.fillText(
+              `${bedrooms} ${bedroomsText} • ${bathrooms} ${bathroomsText} • ${Number(sqft).toLocaleString()} sqft`,
+              15,
+              65,
+            )
           }
 
           // Update progress
