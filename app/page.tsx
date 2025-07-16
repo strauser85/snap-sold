@@ -19,7 +19,7 @@ import {
   Sparkles,
   RefreshCw,
 } from "lucide-react"
-import Textarea from "@/components/ui/textarea"
+import { Textarea } from "@/components/ui/textarea"
 import { SeamlessVideoGenerator } from "@/components/seamless-video-generator"
 
 interface UploadedImage {
@@ -185,13 +185,19 @@ export default function VideoGenerator() {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
       // Fallback script
-      let basicScript = `🚨 This property is about to BLOW YOUR MIND! 🚨\n\nWelcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
+      let basicScript = `🚨 This property is about to BLOW YOUR MIND! 🚨
+
+Welcome to ${address}! This stunning home features ${bedrooms} bedroom${Number(bedrooms) !== 1 ? "s" : ""} and ${bathrooms} bathroom${Number(bathrooms) !== 1 ? "s" : ""}, with ${Number(sqft).toLocaleString()} square feet of pure luxury!`
 
       if (propertyDescription.trim()) {
-        basicScript += `\n\nBut wait, there's more! ${propertyDescription.trim()}`
+        basicScript += `
+
+But wait, there's more! ${propertyDescription.trim()}`
       }
 
-      basicScript += `\n\nPriced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Don't let this slip away! DM me NOW! 📱✨`
+      basicScript += `
+
+Priced at $${Number(price).toLocaleString()}, this property is an incredible opportunity! Don't let this slip away! DM me NOW! 📱✨`
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
