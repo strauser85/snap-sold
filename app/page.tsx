@@ -31,6 +31,13 @@ interface UploadedImage {
   uploadError?: string
 }
 
+interface Caption {
+  text: string
+  startTime: number
+  endTime: number
+  type: "feature" | "price" | "location" | "amenity"
+}
+
 export default function VideoGenerator() {
   const [address, setAddress] = useState("")
   const [price, setPrice] = useState<number | string>("")
@@ -220,47 +227,103 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
     })
   }, [])
 
-  const generateCaptions = (script: string, duration: number) => {
-    const sentences = script
-      .replace(/[^\w\s.,!?'-]/g, " ")
-      .split(/[.!?]+/)
-      .filter((s) => s.trim().length > 0)
-      .map((s) => s.trim())
+  // Generate key feature captions only
+  const generateKeyFeatureCaptions = (duration: number): Caption[] => {
+    const captions: Caption[] = []
+    const timePerCaption = duration / 6 // Spread captions throughout video
 
-    const captions = []
-    let currentTime = 0.5
-    const timePerSentence = (duration - 1) / sentences.length
+    // Key features to highlight
+    const features = [
+      { text: `${bedrooms} BEDROOMS`, type: "feature" as const, timing: 0.15 },
+      { text: `${bathrooms} BATHROOMS`, type: "feature" as const, timing: 0.25 },
+      { text: `${Number(sqft).toLocaleString()} SQ FT`, type: "feature" as const, timing: 0.35 },
+      { text: `$${Number(price).toLocaleString()}`, type: "price" as const, timing: 0.65 },
+      { text: address.split(",")[0].toUpperCase(), type: "location" as const, timing: 0.75 },
+    ]
 
-    sentences.forEach((sentence) => {
-      if (sentence.length > 0) {
-        const words = sentence.split(" ")
-        const phrases = []
+    // Add property description highlights if available
+    if (propertyDescription.trim()) {
+      const highlights = propertyDescription
+        .split(/[,.!]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 5 && s.length < 30)
+        .slice(0, 2) // Max 2 additional highlights
 
-        for (let i = 0; i < words.length; i += 3) {
-          const phrase = words.slice(i, i + 3).join(" ")
-          if (phrase.trim()) {
-            phrases.push(phrase.trim().toUpperCase())
-          }
-        }
-
-        const phraseTime = timePerSentence / phrases.length
-
-        phrases.forEach((phrase, phraseIndex) => {
-          const startTime = currentTime + phraseIndex * phraseTime
-          const endTime = startTime + phraseTime - 0.1
-
-          captions.push({
-            text: phrase,
-            startTime: Math.max(0, startTime),
-            endTime: Math.min(duration, endTime),
-          })
+      highlights.forEach((highlight, index) => {
+        features.push({
+          text: highlight.toUpperCase(),
+          type: "amenity" as const,
+          timing: 0.45 + index * 0.1,
         })
-      }
+      })
+    }
 
-      currentTime += timePerSentence
+    features.forEach((feature, index) => {
+      const startTime = duration * feature.timing
+      const endTime = Math.min(startTime + 2.5, duration - 0.5) // 2.5 second display
+
+      captions.push({
+        text: feature.text,
+        startTime,
+        endTime,
+        type: feature.type,
+      })
     })
 
     return captions
+  }
+
+  // Convert WebM to MP4 using canvas and MediaRecorder
+  const convertToMP4 = async (webmBlob: Blob): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement("video")
+      const canvas = document.createElement("canvas")
+      const ctx = canvas.getContext("2d")!
+
+      video.src = URL.createObjectURL(webmBlob)
+      video.muted = true
+
+      video.onloadedmetadata = () => {
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+
+        const stream = canvas.captureStream(30)
+        const recorder = new MediaRecorder(stream, {
+          mimeType: "video/mp4;codecs=h264,aac",
+          videoBitsPerSecond: 2500000,
+          audioBitsPerSecond: 128000,
+        })
+
+        const chunks: Blob[] = []
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data)
+        }
+
+        recorder.onstop = () => {
+          const mp4Blob = new Blob(chunks, { type: "video/mp4" })
+          URL.revokeObjectURL(video.src)
+          resolve(mp4Blob)
+        }
+
+        recorder.start()
+        video.play()
+
+        const drawFrame = () => {
+          if (video.ended) {
+            recorder.stop()
+            return
+          }
+
+          ctx.drawImage(video, 0, 0)
+          requestAnimationFrame(drawFrame)
+        }
+
+        video.ontimeupdate = drawFrame
+      }
+
+      video.onerror = () => reject(new Error("Video conversion failed"))
+    })
   }
 
   const handleGenerateVideo = async () => {
@@ -292,10 +355,8 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       canvas.width = 576
       canvas.height = 1024
 
-      // Step 1: Generate audio (0-25%)
+      // Step 1: Generate audio (0-20%)
       setProgress(5)
-      console.log("Generating audio...")
-
       const audioResponse = await fetch("/api/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -308,15 +369,13 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
       }
 
       const { audioUrl, duration } = await audioResponse.json()
+      setProgress(20)
+
+      // Step 2: Generate key feature captions (20-25%)
+      const captions = generateKeyFeatureCaptions(duration)
       setProgress(25)
 
-      // Step 2: Generate captions (25-30%)
-      console.log("Generating captions...")
-      const captions = generateCaptions(generatedScript, duration)
-      setProgress(30)
-
-      // Step 3: Load images (30-50%)
-      console.log("Loading images...")
+      // Step 3: Load images (25-40%)
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
       const loadedImages: HTMLImageElement[] = []
 
@@ -324,7 +383,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         try {
           const img = await loadImage(imageUrls[i])
           loadedImages.push(img)
-          setProgress(30 + (i / imageUrls.length) * 20)
+          setProgress(25 + (i / imageUrls.length) * 15)
         } catch (error) {
           console.warn(`Failed to load image ${i + 1}:`, error)
         }
@@ -334,13 +393,13 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         throw new Error("No images could be loaded")
       }
 
-      setProgress(50)
+      setProgress(40)
 
-      // Step 4: Setup audio (50-55%)
-      console.log("Setting up audio...")
+      // Step 4: Setup audio (40-45%) - NO PREVIEW PLAYBACK
       audio.src = audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
+      audio.muted = true // Disable preview playback
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -358,11 +417,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         audio.load()
       })
 
-      setProgress(55)
+      setProgress(45)
 
-      // Step 5: Setup recording (55-60%)
-      console.log("Setting up recording...")
-
+      // Step 5: Setup recording (45-50%)
       let audioContext: AudioContext | null = null
       let audioSource: MediaElementAudioSourceNode | null = null
       let audioDestination: MediaStreamAudioDestinationNode | null = null
@@ -371,7 +428,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         const canvasStream = canvas.captureStream(30)
         audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
 
-        // Resume audio context if suspended
         if (audioContext.state === "suspended") {
           await audioContext.resume()
         }
@@ -379,9 +435,8 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         audioSource = audioContext.createMediaElementSource(audio)
         audioDestination = audioContext.createMediaStreamDestination()
 
-        // Connect audio source to both destination and default output
+        // Connect audio for recording only (no preview)
         audioSource.connect(audioDestination)
-        audioSource.connect(audioContext.destination)
 
         const combinedStream = new MediaStream()
         canvasStream.getVideoTracks().forEach((track) => {
@@ -398,10 +453,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         })
 
         const chunks: Blob[] = []
-        setProgress(60)
+        setProgress(50)
 
-        // Step 6: Record video (60-95%)
-        console.log("Recording video...")
+        // Step 6: Record video (50-85%)
         await new Promise<void>((resolve, reject) => {
           mediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
@@ -423,19 +477,39 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                 throw new Error("No video data recorded")
               }
 
-              const videoBlob = new Blob(chunks, { type: "video/webm" })
-              const videoUrl = URL.createObjectURL(videoBlob)
-              setVideoUrl(videoUrl)
+              const webmBlob = new Blob(chunks, { type: "video/webm" })
+              setProgress(85)
 
-              // Auto-download
-              const link = document.createElement("a")
-              link.href = videoUrl
-              link.download = "property-video.webm"
-              document.body.appendChild(link)
-              link.click()
-              document.body.removeChild(link)
+              // Step 7: Convert to MP4 (85-95%)
+              try {
+                const mp4Blob = await convertToMP4(webmBlob)
+                const videoUrl = URL.createObjectURL(mp4Blob)
+                setVideoUrl(videoUrl)
+                setProgress(95)
 
-              resolve()
+                // Auto-download MP4
+                const link = document.createElement("a")
+                link.href = videoUrl
+                link.download = "property-video.mp4"
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+
+                resolve()
+              } catch (conversionError) {
+                // Fallback to WebM if MP4 conversion fails
+                const videoUrl = URL.createObjectURL(webmBlob)
+                setVideoUrl(videoUrl)
+
+                const link = document.createElement("a")
+                link.href = videoUrl
+                link.download = "property-video.webm"
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+
+                resolve()
+              }
             } catch (error) {
               reject(error)
             }
@@ -447,8 +521,9 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
           mediaRecorder.start(100)
 
-          // Start audio and animation
+          // Start silent audio and animation
           audio.currentTime = 0
+          audio.muted = true // Ensure no preview playback
           audio.play().catch(console.error)
 
           const startTime = Date.now()
@@ -469,7 +544,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
             const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
             // Find current caption
-            const currentCaptionData = captions.find(
+            const currentCaption = captions.find(
               (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
             )
 
@@ -489,37 +564,44 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
               ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-              // Draw captions
-              if (currentCaptionData) {
-                const fontSize = Math.floor(canvas.width * 0.08)
+              // Draw key feature captions only
+              if (currentCaption) {
+                const fontSize = Math.floor(canvas.width * 0.09)
                 ctx.font = `900 ${fontSize}px Arial, sans-serif`
                 ctx.textAlign = "center"
 
-                const words = currentCaptionData.text.split(" ")
+                // Caption styling based on type
+                let captionColor = "#FFFF00" // Default yellow
+                if (currentCaption.type === "price") captionColor = "#00FF00" // Green for price
+                if (currentCaption.type === "location") captionColor = "#FF6B6B" // Red for location
+                if (currentCaption.type === "amenity") captionColor = "#4ECDC4" // Teal for amenities
+
+                const words = currentCaption.text.split(" ")
                 const lines: string[] = []
 
+                // Break into lines (max 2 words per line for impact)
                 for (let i = 0; i < words.length; i += 2) {
                   lines.push(words.slice(i, i + 2).join(" "))
                 }
 
-                const lineHeight = fontSize * 1.3
-                const startY = canvas.height * 0.75
+                const lineHeight = fontSize * 1.2
+                const startY = canvas.height * 0.7
 
                 lines.forEach((line, lineIndex) => {
                   const y = startY + lineIndex * lineHeight
 
-                  // Black outline
+                  // Black outline for readability
                   ctx.strokeStyle = "#000000"
-                  ctx.lineWidth = Math.floor(fontSize * 0.2)
+                  ctx.lineWidth = Math.floor(fontSize * 0.15)
                   ctx.strokeText(line, canvas.width / 2, y)
 
-                  // Yellow text
-                  ctx.fillStyle = "#FFFF00"
+                  // Colored text
+                  ctx.fillStyle = captionColor
                   ctx.fillText(line, canvas.width / 2, y)
                 })
               }
 
-              // Property info overlay
+              // Property info overlay (always visible)
               ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
               ctx.fillRect(0, 0, canvas.width, 80)
 
@@ -538,8 +620,8 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
             }
 
             // Update progress
-            const recordingProgress = 60 + (elapsed / durationMs) * 35
-            setProgress(Math.min(95, recordingProgress))
+            const recordingProgress = 50 + (elapsed / durationMs) * 35
+            setProgress(Math.min(85, recordingProgress))
 
             requestAnimationFrame(animate)
           }
@@ -549,9 +631,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
 
         setProgress(100)
         setIsGenerating(false)
-        console.log("Video generation complete!")
       } catch (recordingError) {
-        // Clean up audio context on error
         if (audioContext) {
           try {
             await audioContext.close()
@@ -562,7 +642,6 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
         throw recordingError
       }
     } catch (error) {
-      console.error("Video generation failed:", error)
       setError(error instanceof Error ? error.message : "Video generation failed")
       setIsGenerating(false)
       setProgress(0)
@@ -896,7 +975,7 @@ Priced at $${Number(price).toLocaleString()}, this property is an incredible opp
                     asChild
                     className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
                   >
-                    <a href={videoUrl} download="property-video.webm">
+                    <a href={videoUrl} download="property-video.mp4">
                       <Download className="mr-2 h-5 w-5" />
                       Download Again
                     </a>
