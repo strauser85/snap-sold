@@ -27,6 +27,7 @@ const STREET_ABBREVIATIONS: Record<string, string> = {
 }
 
 function expandStreetAbbreviations(address: string): string {
+  if (!address) return ""
   return address
     .split(" ")
     .map((word) => STREET_ABBREVIATIONS[word] || word)
@@ -34,6 +35,7 @@ function expandStreetAbbreviations(address: string): string {
 }
 
 function formatNumbersForSpeech(text: string): string {
+  if (!text) return ""
   return text
     .replace(/\b(\d+)\.5\b/g, "$1 and a half")
     .replace(/\b1\.5\b/g, "one and a half")
@@ -45,29 +47,35 @@ function formatNumbersForSpeech(text: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = await request.json()
+    const body = await request.json()
+    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = body
 
+    // Validate required fields
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
       return NextResponse.json({ error: "All property details are required" }, { status: 400 })
     }
 
     const expandedAddress = expandStreetAbbreviations(address)
+    const numPrice = Number(price) || 0
+    const numSqft = Number(sqft) || 0
+    const numBedrooms = Number(bedrooms) || 0
+    const numBathrooms = Number(bathrooms) || 0
 
     let script = ""
     let method = "Template"
 
-    // Try OpenAI first
+    // Try OpenAI first if API key is available
     if (process.env.OPENAI_API_KEY) {
       try {
-        const prompt = `Create a compelling 30-45 second TikTok script for a real estate listing with these details:
+        const prompt = `Create a compelling 30-45 second TikTok script for a real estate listing:
 
 Address: ${expandedAddress}
-Price: $${Number(price).toLocaleString()}
-Bedrooms: ${bedrooms}
-Bathrooms: ${bathrooms}
-Square Feet: ${Number(sqft).toLocaleString()}
+Price: $${numPrice.toLocaleString()}
+Bedrooms: ${numBedrooms}
+Bathrooms: ${numBathrooms}
+Square Feet: ${numSqft.toLocaleString()}
 ${propertyDescription ? `Description: ${propertyDescription}` : ""}
-Images: ${imageCount} photos available
+Images: ${imageCount || 0} photos available
 
 Requirements:
 - Engaging hook in first 3 seconds
@@ -75,7 +83,7 @@ Requirements:
 - Create urgency and excitement
 - Natural conversational tone
 - 30-45 seconds when spoken
-- Use "and a half" for .5 numbers (e.g., "two and a half bathrooms")
+- Use "and a half" for .5 numbers
 
 Write only the script text, no stage directions.`
 
@@ -89,27 +97,28 @@ Write only the script text, no stage directions.`
         method = "OpenAI"
       } catch (error) {
         console.warn("OpenAI failed, using template:", error)
+        // Continue to fallback template
       }
     }
 
-    // Fallback template if OpenAI fails
+    // Fallback template if OpenAI fails or no API key
     if (!script) {
       const bathroomText =
-        Number(bathrooms) === 1
+        numBathrooms === 1
           ? "bathroom"
-          : bathrooms.toString().includes(".5")
-            ? `${bathrooms.replace(".5", " and a half")} bathrooms`
-            : `${bathrooms} bathrooms`
+          : numBathrooms.toString().includes(".5")
+            ? `${numBathrooms.toString().replace(".5", " and a half")} bathrooms`
+            : `${numBathrooms} bathrooms`
 
-      const bedroomText = Number(bedrooms) === 1 ? "bedroom" : `${bedrooms} bedrooms`
+      const bedroomText = numBedrooms === 1 ? "bedroom" : `${numBedrooms} bedrooms`
 
       script = `🏠 STUNNING ${bedroomText.toUpperCase()}, ${bathroomText.toUpperCase()} HOME! 
 
-Located at ${expandedAddress}, this gorgeous ${Number(sqft).toLocaleString()} square foot property is priced at just $${Number(price).toLocaleString()}!
+Located at ${expandedAddress}, this gorgeous ${numSqft.toLocaleString()} square foot property is priced at just $${numPrice.toLocaleString()}!
 
 ${propertyDescription ? `Featuring ${propertyDescription.toLowerCase()}, ` : ""}This home offers incredible value in today's market.
 
-${bedroomText} and ${bathroomText} provide perfect space for your family. At ${Number(sqft).toLocaleString()} square feet, you'll have room to grow and thrive.
+${bedroomText} and ${bathroomText} provide perfect space for your family. At ${numSqft.toLocaleString()} square feet, you'll have room to grow and thrive.
 
 Don't wait - homes like this don't last long! Contact me today to schedule your private showing. This could be YOUR dream home! 
 
@@ -118,7 +127,10 @@ Don't wait - homes like this don't last long! Contact me today to schedule your 
       script = formatNumbersForSpeech(script)
     }
 
-    return NextResponse.json({ script, method })
+    return NextResponse.json({
+      script: script || "Unable to generate script. Please try again.",
+      method,
+    })
   } catch (error) {
     console.error("Script generation error:", error)
     return NextResponse.json(

@@ -1,47 +1,40 @@
 import { type NextRequest, NextResponse } from "next/server"
+import * as fal from "@fal-ai/serverless-client"
 
 export async function POST(request: NextRequest) {
   try {
-    const { webmUrl } = await request.json()
+    const { videoUrl } = await request.json()
 
-    if (!webmUrl) {
-      return NextResponse.json({ error: "WebM URL is required" }, { status: 400 })
+    if (!videoUrl) {
+      return NextResponse.json({ error: "Video URL is required" }, { status: 400 })
     }
 
+    if (!process.env.FAL_KEY) {
+      return NextResponse.json({ error: "Fal API key not configured" }, { status: 500 })
+    }
+
+    fal.config({
+      credentials: process.env.FAL_KEY,
+    })
+
     // Use Fal AI for video conversion
-    const response = await fetch("https://fal.run/fal-ai/video-converter", {
-      method: "POST",
-      headers: {
-        Authorization: `Key ${process.env.FAL_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        video_url: webmUrl,
+    const result = await fal.subscribe("fal-ai/video-to-video", {
+      input: {
+        video_url: videoUrl,
         output_format: "mp4",
         quality: "high",
         max_file_size_mb: 100,
-      }),
+      },
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("Fal AI conversion error:", errorText)
-      return NextResponse.json(
-        {
-          error: "MP4 conversion failed",
-          details: `Fal AI returned ${response.status}`,
-        },
-        { status: 500 },
-      )
+    if (!result.data?.video?.url) {
+      throw new Error("No converted video URL returned")
     }
 
-    const result = await response.json()
-
-    if (!result.video_url) {
-      throw new Error("No MP4 URL returned from conversion")
-    }
-
-    return NextResponse.json({ mp4Url: result.video_url })
+    return NextResponse.json({
+      mp4Url: result.data.video.url,
+      fileSize: result.data.video.file_size || 0,
+    })
   } catch (error) {
     console.error("MP4 conversion error:", error)
     return NextResponse.json(
