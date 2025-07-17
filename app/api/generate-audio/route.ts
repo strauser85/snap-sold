@@ -1,169 +1,65 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-export const maxDuration = 60
-
-interface ElevenLabsResponse {
-  audio_base64?: string
-  alignment?: {
-    characters: string[]
-    character_start_times_seconds: number[]
-    character_end_times_seconds: number[]
-  }
-}
-
-function sanitizeScriptForElevenLabs(script: string): string {
-  console.log("🧹 SANITIZING SCRIPT FOR ELEVENLABS...")
-
-  let sanitized = script
-    // Remove ALL emoji / pictographs
-    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
-    // Clean up multiple spaces and line breaks
-    .replace(/\s+/g, " ")
-    .replace(/\n+/g, ". ")
-    // Remove problematic punctuation combinations
-    .replace(/[!]{2,}/g, "!")
-    .replace(/[?]{2,}/g, "?")
-    .replace(/[.]{2,}/g, ".")
-    // Ensure proper sentence endings
-    .replace(/([a-zA-Z0-9])\s*([A-Z])/g, "$1. $2")
-    .trim()
-
-  // Ensure it ends with proper punctuation
-  if (sanitized && !sanitized.match(/[.!?]$/)) {
-    sanitized += "."
-  }
-
-  console.log(`✅ Script sanitized: ${script.length} → ${sanitized.length} chars`)
-  return sanitized
-}
-
-function calculateOptimalDuration(script: string): number {
-  const wordCount = script.split(/\s+/).length
-  const baseReadingTime = (wordCount / 180) * 60 // 180 WPM for natural speech
-  const finalDuration = Math.min(Math.max(baseReadingTime, 10), 45) // 10-45 second range
-  console.log(`📊 Duration: ${finalDuration.toFixed(1)}s for ${wordCount} words`)
-  return finalDuration
-}
-
 export async function POST(request: NextRequest) {
-  console.log("🎤 STARTING AUDIO GENERATION WITH RACHEL VOICE")
-
   try {
     const { script } = await request.json()
 
-    if (!script || typeof script !== "string" || script.trim().length < 10) {
-      throw new Error("Script is required and must be at least 10 characters")
+    if (!script) {
+      return NextResponse.json({ error: "No script provided" }, { status: 400 })
     }
 
-    const sanitizedScript = sanitizeScriptForElevenLabs(script)
-    const duration = calculateOptimalDuration(sanitizedScript)
-
-    const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY
-    if (!elevenLabsApiKey) {
-      throw new Error("ElevenLabs API key not configured")
-    }
-
-    console.log("🎤 GENERATING AUDIO WITH RACHEL VOICE...")
-
-    const elevenLabsPayload = {
-      text: sanitizedScript,
-      model_id: "eleven_turbo_v2_5",
-      voice_settings: {
-        stability: 0.75,
-        similarity_boost: 0.8,
-        style: 0.2,
-        use_speaker_boost: true,
+    // Use ElevenLabs API
+    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/pNInz6obpgDQGcFmaJgB", {
+      method: "POST",
+      headers: {
+        Accept: "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
       },
-      output_format: "mp3_44100_128",
-      apply_text_normalization: "auto",
+      body: JSON.stringify({
+        text: script,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.5,
+        },
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`ElevenLabs API error: ${response.status}`)
     }
 
-    let audioResponse: Response
-    let attempts = 0
-    const maxAttempts = 3
+    const audioBuffer = await response.arrayBuffer()
 
-    while (attempts < maxAttempts) {
-      attempts++
-      console.log(`🎤 Audio generation attempt ${attempts}/${maxAttempts}`)
+    // Upload audio to blob storage
+    const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" })
+    const formData = new FormData()
+    formData.append("file", audioBlob, "audio.mp3")
 
-      try {
-        audioResponse = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "xi-api-key": elevenLabsApiKey,
-          },
-          body: JSON.stringify(elevenLabsPayload),
-        })
+    const uploadResponse = await fetch(`${request.nextUrl.origin}/api/upload-image`, {
+      method: "POST",
+      body: formData,
+    })
 
-        if (audioResponse.ok) {
-          console.log(`✅ Audio generation successful on attempt ${attempts}`)
-          break
-        } else {
-          const errorText = await audioResponse.text()
-          console.error(`❌ ElevenLabs API error (attempt ${attempts}):`, errorText)
-
-          if (attempts === maxAttempts) {
-            throw new Error(`ElevenLabs API failed after ${maxAttempts} attempts: ${errorText}`)
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, 1000 * attempts))
-        }
-      } catch (fetchError) {
-        console.error(`❌ Network error on attempt ${attempts}:`, fetchError)
-
-        if (attempts === maxAttempts) {
-          throw new Error(`Network error after ${maxAttempts} attempts: ${fetchError}`)
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 1000 * attempts))
-      }
+    if (!uploadResponse.ok) {
+      throw new Error("Audio upload failed")
     }
 
-    console.log("🎵 PROCESSING AUDIO RESPONSE...")
+    const { url: audioUrl } = await uploadResponse.json()
 
-    const audioBuffer = await audioResponse!.arrayBuffer()
-    console.log(`📊 Audio buffer size: ${audioBuffer.byteLength} bytes`)
+    // Estimate duration (rough calculation: ~150 words per minute)
+    const wordCount = script.split(" ").length
+    const estimatedDuration = Math.max(10, (wordCount / 150) * 60)
 
-    if (audioBuffer.byteLength === 0) {
-      throw new Error("Received empty audio buffer")
-    }
-
-    // Validate audio buffer (check for MP3 header)
-    const uint8Array = new Uint8Array(audioBuffer)
-    const isValidMP3 = uint8Array[0] === 0xff && (uint8Array[1] & 0xe0) === 0xe0
-
-    if (!isValidMP3) {
-      console.warn("⚠️ Audio buffer may not be valid MP3, but continuing...")
-    } else {
-      console.log("✅ Valid MP3 audio buffer confirmed")
-    }
-
-    // Convert to base64 data URL with proper MIME type
-    const base64Audio = Buffer.from(audioBuffer).toString("base64")
-    const audioUrl = `data:audio/mpeg;base64,${base64Audio}`
-
-    console.log(`✅ Audio converted to data URL: ${audioUrl.length} characters`)
-
-    const response = {
+    return NextResponse.json({
       audioUrl,
-      duration,
-      audioSize: audioBuffer.byteLength,
-      audioFormat: "mp3",
-    }
-
-    console.log("✅ AUDIO GENERATION SUCCESSFUL")
-    return NextResponse.json(response)
+      duration: estimatedDuration,
+    })
   } catch (error) {
-    console.error("❌ AUDIO GENERATION FAILED:", error)
-
+    console.error("Audio generation error:", error)
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unknown error occurred",
-        details: error instanceof Error ? error.stack : "No additional details",
-        timestamp: new Date().toISOString(),
-      },
+      { error: "Audio generation failed", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
   }

@@ -59,38 +59,6 @@ export default function VideoGenerator() {
 
   const MAX_IMAGES = 30
 
-  const numberToWords = (num: number): string => {
-    const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-    const teens = [
-      "ten",
-      "eleven",
-      "twelve",
-      "thirteen",
-      "fourteen",
-      "fifteen",
-      "sixteen",
-      "seventeen",
-      "eighteen",
-      "nineteen",
-    ]
-    const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
-
-    if (num === 0) return "zero"
-    if (num < 10) return ones[num]
-    if (num < 20) return teens[num - 10]
-    if (num < 100) {
-      const tenDigit = Math.floor(num / 10)
-      const oneDigit = num % 10
-      return tens[tenDigit] + (oneDigit > 0 ? " " + ones[oneDigit] : "")
-    }
-    if (num < 1000) {
-      const hundreds = Math.floor(num / 100)
-      const remainder = num % 100
-      return ones[hundreds] + " hundred" + (remainder > 0 ? " " + numberToWords(remainder) : "")
-    }
-    return num.toString()
-  }
-
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
@@ -223,27 +191,6 @@ export default function VideoGenerator() {
       setScriptMethod(data.method)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
-
-      const safePrice = Number(price) || 0
-      const safeBedrooms = Number(bedrooms) || 0
-      const safeBathrooms = Number(bathrooms) || 0
-      const safeSqft = Number(sqft) || 0
-
-      const bedroomsText =
-        safeBedrooms === 1 ? `${numberToWords(safeBedrooms)} bedroom` : `${numberToWords(safeBedrooms)} bedrooms`
-      const bathroomsText =
-        safeBathrooms === 1 ? `${numberToWords(safeBathrooms)} bathroom` : `${numberToWords(safeBathrooms)} bathrooms`
-
-      let basicScript = `Stop scrolling! This property is about to blow your mind!\n\nWelcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
-
-      if (propertyDescription.trim()) {
-        basicScript += `\n\nBut wait, there's more! ${propertyDescription.trim()}`
-      }
-
-      basicScript += `\n\nPriced at ${safePrice.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now!`
-
-      setGeneratedScript(basicScript)
-      setScriptMethod("fallback")
     } finally {
       setIsGeneratingScript(false)
     }
@@ -259,21 +206,17 @@ export default function VideoGenerator() {
     })
   }, [])
 
-  // FIXED: Generate ONLY key property detail captions with PROPER WORDS and COLORS
   const generatePropertyCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
     try {
-      // Safely extract and validate all values
       const safeAddress = typeof address === "string" && address.trim() ? address.trim() : ""
       const safePrice = typeof price === "string" || typeof price === "number" ? Number(price) : 0
       const safeBedrooms = typeof bedrooms === "string" || typeof bedrooms === "number" ? Number(bedrooms) : 0
       const safeBathrooms = typeof bathrooms === "string" || typeof bathrooms === "number" ? Number(bathrooms) : 0
       const safeSqft = typeof sqft === "string" || typeof sqft === "number" ? Number(sqft) : 0
 
-      // Only proceed if we have valid data
       if (safeAddress && safePrice > 0 && safeBedrooms > 0 && safeBathrooms > 0 && safeSqft > 0) {
-        // Create property detail captions with FULL WORDS (no abbreviations)
         const propertyDetails = [
           {
             text: `${safeBedrooms} ${safeBedrooms === 1 ? "BEDROOM" : "BEDROOMS"}`,
@@ -301,7 +244,6 @@ export default function VideoGenerator() {
           },
         ]
 
-        // Add location caption
         if (safeAddress.length > 0) {
           const locationText = safeAddress.includes(",")
             ? safeAddress.split(",")[0].trim().toUpperCase()
@@ -317,13 +259,12 @@ export default function VideoGenerator() {
           }
         }
 
-        // Add key features from description
         if (typeof propertyDescription === "string" && propertyDescription.trim()) {
           const features = propertyDescription
             .split(/[,.!;]/)
             .map((s) => s.trim())
             .filter((s) => s.length > 3 && s.length < 25)
-            .slice(0, 2) // Max 2 features
+            .slice(0, 2)
 
           features.forEach((feature, index) => {
             propertyDetails.push({
@@ -335,7 +276,6 @@ export default function VideoGenerator() {
           })
         }
 
-        // Convert to caption format with safe timing
         propertyDetails.forEach((detail) => {
           const startTime = Math.max(0, detail.startTime)
           const endTime = Math.min(duration - 0.5, startTime + detail.duration)
@@ -354,7 +294,6 @@ export default function VideoGenerator() {
       console.error("Caption generation error:", error)
     }
 
-    console.log(`✅ Generated ${captions.length} property captions`)
     return captions
   }
 
@@ -387,7 +326,6 @@ export default function VideoGenerator() {
       canvas.width = 576
       canvas.height = 1024
 
-      // Step 1: Generate audio (0-15%)
       setProgress(5)
       const audioResponse = await fetch("/api/generate-audio", {
         method: "POST",
@@ -403,11 +341,9 @@ export default function VideoGenerator() {
       const { audioUrl, duration } = await audioResponse.json()
       setProgress(15)
 
-      // Step 2: Generate property captions (15-20%)
       const captions = generatePropertyCaptions(duration)
       setProgress(20)
 
-      // Step 3: Load images (20-35%)
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
       const loadedImages: HTMLImageElement[] = []
 
@@ -427,12 +363,11 @@ export default function VideoGenerator() {
 
       setProgress(35)
 
-      // Step 4: Setup audio element (35-40%) - SILENT
       audio.src = audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
       audio.volume = 1.0
-      audio.muted = true // MUTED - NO PREVIEW
+      audio.muted = true
       audio.loop = false
       audio.autoplay = false
 
@@ -460,7 +395,6 @@ export default function VideoGenerator() {
 
       setProgress(40)
 
-      // Step 5: Setup recording (40-45%)
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
       if (audioContext.state === "suspended") {
         await audioContext.resume()
@@ -469,7 +403,6 @@ export default function VideoGenerator() {
       const audioSource = audioContext.createMediaElementSource(audio)
       const audioDestination = audioContext.createMediaStreamDestination()
       audioSource.connect(audioDestination)
-      // NO connection to speakers - silent generation
 
       const canvasStream = canvas.captureStream(30)
       const combinedStream = new MediaStream()
@@ -486,7 +419,6 @@ export default function VideoGenerator() {
       const chunks: Blob[] = []
       setProgress(45)
 
-      // Step 6: Record video (45-75%)
       await new Promise<void>((resolve, reject) => {
         mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
@@ -509,47 +441,50 @@ export default function VideoGenerator() {
             const webmBlob = new Blob(chunks, { type: "video/webm" })
             setProgress(75)
 
-            // Step 7: Convert to MP4 (75-95%)
-            console.log("🔄 Converting to MP4...")
             const formData = new FormData()
-            formData.append("webm", webmBlob)
+            formData.append("file", webmBlob, "video.webm")
 
-            const convertResponse = await fetch("/api/convert-to-mp4", {
+            const uploadResponse = await fetch("/api/upload-image", {
               method: "POST",
               body: formData,
             })
 
-            if (!convertResponse.ok) {
-              console.warn("⚠️ MP4 conversion failed, using WebM")
-              // Fallback to WebM
-              const videoUrl = URL.createObjectURL(webmBlob)
-              setVideoUrl(videoUrl)
+            if (!uploadResponse.ok) {
+              throw new Error("Upload failed")
+            }
+
+            const { url: webmUrl } = await uploadResponse.json()
+
+            const convertResponse = await fetch("/api/convert-to-mp4", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ webmUrl }),
+            })
+
+            if (convertResponse.ok) {
+              const { mp4Url } = await convertResponse.json()
+              setProgress(95)
 
               const link = document.createElement("a")
-              link.href = videoUrl
+              link.href = mp4Url
+              link.download = "property-video.mp4"
+              link.target = "_blank"
+              document.body.appendChild(link)
+              link.click()
+              document.body.removeChild(link)
+
+              setVideoUrl(mp4Url)
+            } else {
+              const link = document.createElement("a")
+              link.href = webmUrl
               link.download = "property-video.webm"
               document.body.appendChild(link)
               link.click()
               document.body.removeChild(link)
 
-              resolve()
-              return
+              setVideoUrl(webmUrl)
             }
 
-            const { mp4Url } = await convertResponse.json()
-            console.log("✅ MP4 conversion successful")
-            setProgress(95)
-
-            // Auto-download MP4
-            const link = document.createElement("a")
-            link.href = mp4Url
-            link.download = "property-video.mp4"
-            link.target = "_blank"
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-
-            setVideoUrl(mp4Url)
             resolve()
           } catch (error) {
             console.error("Processing error:", error)
@@ -562,10 +497,9 @@ export default function VideoGenerator() {
           reject(new Error("Recording failed"))
         }
 
-        // Start recording
         mediaRecorder.start(100)
         audio.currentTime = 0
-        audio.muted = false // Unmute for recording only
+        audio.muted = false
         audio.play().catch(console.error)
 
         const startTime = Date.now()
@@ -584,18 +518,15 @@ export default function VideoGenerator() {
 
           const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-          // Find current caption
           const currentCaption = captions.find(
             (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
           )
 
           const img = loadedImages[imageIndex]
           if (img) {
-            // Clear canvas
             ctx.fillStyle = "#000000"
             ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-            // Draw image
             const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
             const scaledWidth = img.width * scale
             const scaledHeight = img.height * scale
@@ -604,25 +535,17 @@ export default function VideoGenerator() {
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw FIXED property captions with PROPER COLORS
             if (currentCaption && currentCaption.text) {
               const fontSize = Math.floor(canvas.width * 0.08)
               ctx.font = `900 ${fontSize}px Arial, sans-serif`
               ctx.textAlign = "center"
 
-              // FIXED CAPTION COLORS - BRIGHT AND VISIBLE
-              let captionColor = "#FFFFFF" // Default white
-              if (currentCaption.type === "price") captionColor = "#00FF00" // Bright green for price
-              if (currentCaption.type === "location") captionColor = "#FF4444" // Bright red for location
-              if (currentCaption.type === "bedrooms") captionColor = "#00CCFF" // Bright cyan for bedrooms
-              if (currentCaption.type === "bathrooms") captionColor = "#FF00FF" // Bright magenta for bathrooms
-              if (currentCaption.type === "sqft") captionColor = "#FFFF00" // Bright yellow for sqft
-              if (currentCaption.type === "feature") captionColor = "#FF8800" // Bright orange for features
+              // ALL CAPTIONS ARE NOW BRIGHT YELLOW
+              const captionColor = "#FFFF00"
 
               const words = currentCaption.text.split(" ")
               const lines: string[] = []
 
-              // Break into lines (max 2 words per line)
               for (let i = 0; i < words.length; i += 2) {
                 lines.push(words.slice(i, i + 2).join(" "))
               }
@@ -633,18 +556,15 @@ export default function VideoGenerator() {
               lines.forEach((line, lineIndex) => {
                 const y = startY + lineIndex * lineHeight
 
-                // THICK BLACK OUTLINE for readability
                 ctx.strokeStyle = "#000000"
                 ctx.lineWidth = Math.floor(fontSize * 0.2)
                 ctx.strokeText(line, canvas.width / 2, y)
 
-                // BRIGHT COLORED TEXT
                 ctx.fillStyle = captionColor
                 ctx.fillText(line, canvas.width / 2, y)
               })
             }
 
-            // Property info overlay
             ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
             ctx.fillRect(0, 0, canvas.width, 80)
 
@@ -717,7 +637,6 @@ export default function VideoGenerator() {
       <audio ref={audioRef} preload="auto" className="hidden" />
 
       <div className="w-full max-w-2xl space-y-8">
-        {/* Header */}
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-2">
             <Sparkles className="h-8 w-8 text-purple-600" />
@@ -729,7 +648,6 @@ export default function VideoGenerator() {
           <p className="text-lg text-gray-600 leading-relaxed">Create viral listing videos that sell homes fast</p>
         </div>
 
-        {/* Form */}
         <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
           <CardContent className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -941,7 +859,6 @@ export default function VideoGenerator() {
               />
             </div>
 
-            {/* Progress Bar - CLEAN */}
             {isGenerating && (
               <div className="space-y-2">
                 <Progress value={progress} className="h-4" />
@@ -949,7 +866,6 @@ export default function VideoGenerator() {
               </div>
             )}
 
-            {/* SINGLE GENERATE BUTTON */}
             <Button
               onClick={handleGenerateVideo}
               disabled={
@@ -981,7 +897,6 @@ export default function VideoGenerator() {
           </CardContent>
         </Card>
 
-        {/* Error */}
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -997,7 +912,6 @@ export default function VideoGenerator() {
           </Alert>
         )}
 
-        {/* CLEAN SUCCESS - NO NOISE */}
         {videoUrl && !isGenerating && (
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
             <CardContent className="p-6">
