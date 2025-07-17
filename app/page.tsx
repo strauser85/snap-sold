@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, type ChangeEvent } from "react"
-import { Loader2, AlertCircle, XCircle, Wand2, Play, Download, RotateCcw } from "lucide-react"
+import { Loader2, AlertCircle, XCircle, Wand2, Play, Download, RotateCcw, CheckCircle } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,6 +17,7 @@ interface UploadedImage {
   id: string
   isUploading?: boolean
   uploadError?: string
+  uploadSuccess?: boolean
 }
 
 interface Caption {
@@ -108,25 +109,31 @@ function VideoGenerator() {
     })
   }
 
-  const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
+  const compressImage = (file: File, maxWidth = 1200, quality = 0.85): Promise<File> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
       const ctx = canvas.getContext("2d")!
       const img = new Image()
 
       img.onload = () => {
+        // Calculate new dimensions while maintaining aspect ratio
         const ratio = Math.min(maxWidth / img.width, maxWidth / img.height)
         canvas.width = img.width * ratio
         canvas.height = img.height * ratio
 
+        // Draw and compress
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
         canvas.toBlob(
           (blob) => {
-            const compressedFile = new File([blob!], file.name, {
-              type: "image/jpeg",
-              lastModified: Date.now(),
-            })
-            resolve(compressedFile)
+            if (blob) {
+              const compressedFile = new File([blob], file.name, {
+                type: "image/jpeg",
+                lastModified: Date.now(),
+              })
+              resolve(compressedFile)
+            } else {
+              resolve(file) // Fallback to original
+            }
           },
           "image/jpeg",
           quality,
@@ -139,53 +146,103 @@ function VideoGenerator() {
     })
   }
 
-  const uploadImageToBlob = async (file: File): Promise<string> => {
-    const formData = new FormData()
-    formData.append("file", file)
+  const uploadSingleImage = async (file: File, id: string): Promise<void> => {
+    try {
+      // Compress image before upload
+      const compressedFile = await compressImage(file)
 
-    const response = await fetch("/api/upload-image", {
-      method: "POST",
-      body: formData,
-    })
+      const formData = new FormData()
+      formData.append("file", compressedFile)
 
-    if (!response.ok) {
-      const err = await response.json()
-      throw new Error(err.error || "Upload failed")
+      const response = await fetch("/api/upload-image", {
+        method: "POST",
+        body: formData,
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || "Upload failed")
+      }
+
+      // Update image state with success
+      setUploadedImages((prev) =>
+        prev.map((img) =>
+          img.id === id
+            ? {
+                ...img,
+                blobUrl: result.url,
+                isUploading: false,
+                uploadSuccess: true,
+                uploadError: undefined,
+              }
+            : img,
+        ),
+      )
+    } catch (err) {
+      // Update image state with error - don't block other uploads
+      setUploadedImages((prev) =>
+        prev.map((img) =>
+          img.id === id
+            ? {
+                ...img,
+                isUploading: false,
+                uploadError: err instanceof Error ? err.message : "Upload failed",
+                uploadSuccess: false,
+              }
+            : img,
+        ),
+      )
     }
-
-    const { url } = await response.json()
-    return url
   }
 
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     const freeSlots = MAX_IMAGES - uploadedImages.length
+    const filesToUpload = files.slice(0, freeSlots)
 
-    files.slice(0, freeSlots).forEach(async (file, idx) => {
+    // Validate file types and sizes before starting uploads
+    const validFiles: File[] = []
+    const invalidFiles: string[] = []
+
+    filesToUpload.forEach((file) => {
+      const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+      const maxSize = 10 * 1024 * 1024 // 10MB
+
+      if (!allowedTypes.includes(file.type)) {
+        invalidFiles.push(`${file.name}: Unsupported format`)
+      } else if (file.size > maxSize) {
+        invalidFiles.push(`${file.name}: Too large (${Math.round(file.size / 1024 / 1024)}MB)`)
+      } else {
+        validFiles.push(file)
+      }
+    })
+
+    // Show validation errors if any
+    if (invalidFiles.length > 0) {
+      setError(`Some files were skipped: ${invalidFiles.join(", ")}`)
+      setTimeout(() => setError(null), 5000) // Clear error after 5 seconds
+    }
+
+    // Add valid files to state and start uploads
+    validFiles.forEach(async (file, idx) => {
       const id = `img-${Date.now()}-${idx}`
       const newImg: UploadedImage = {
         file,
         previewUrl: URL.createObjectURL(file),
         id,
         isUploading: true,
+        uploadSuccess: false,
       }
+
       setUploadedImages((prev) => [...prev, newImg])
 
-      try {
-        const compressed = await compressImage(file)
-        const blobUrl = await uploadImageToBlob(compressed)
-        setUploadedImages((prev) => prev.map((img) => (img.id === id ? { ...img, blobUrl, isUploading: false } : img)))
-      } catch (err) {
-        // SILENT ERROR HANDLING - CONTINUE WITH OTHER IMAGES
-        setUploadedImages((prev) =>
-          prev.map((img) =>
-            img.id === id
-              ? { ...img, isUploading: false, uploadError: err instanceof Error ? err.message : "Upload failed" }
-              : img,
-          ),
-        )
-      }
+      // Start upload (don't await - let them run in parallel)
+      uploadSingleImage(file, id)
     })
+
+    // Clear the input
+    e.target.value = ""
   }
 
   const removeImage = (id: string) => {
@@ -322,8 +379,10 @@ function VideoGenerator() {
 
   // SINGLE "GENERATE VIDEO" BUTTON - DOES EVERYTHING
   const generateVideo = async () => {
-    if (uploadedImages.filter((i) => i.blobUrl).length === 0) {
-      setError("Upload at least one image.")
+    const successfulUploads = uploadedImages.filter((i) => i.blobUrl && i.uploadSuccess)
+
+    if (successfulUploads.length === 0) {
+      setError("Upload at least one image successfully.")
       return
     }
     if (!generatedScript) {
@@ -361,7 +420,7 @@ function VideoGenerator() {
 
       // Step 3: Load images with SILENT error handling
       const imgs = []
-      for (const up of uploadedImages.filter((u) => u.blobUrl)) {
+      for (const up of successfulUploads) {
         try {
           const img = await safeLoadImage(up.blobUrl!)
           imgs.push(img)
@@ -562,7 +621,7 @@ function VideoGenerator() {
     setError(null)
   }
 
-  const uploaded = uploadedImages.filter((i) => i.blobUrl).length
+  const uploaded = uploadedImages.filter((i) => i.uploadSuccess).length
   const uploading = uploadedImages.filter((i) => i.isUploading).length
   const failed = uploadedImages.filter((i) => i.uploadError).length
 
@@ -647,9 +706,16 @@ function VideoGenerator() {
 
             <div className="space-y-2">
               <Label>Upload Property Images (Max {MAX_IMAGES})</Label>
-              <Input type="file" multiple accept="image/*" onChange={handleImageUpload} disabled={isGenerating} />
+              <Input
+                type="file"
+                multiple
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                onChange={handleImageUpload}
+                disabled={isGenerating}
+              />
               <p className="text-sm text-gray-500">
                 {uploaded} uploaded, {uploading} uploading, {failed} failed
+                {uploadedImages.length > 0 && ` • Supports JPG, PNG, WebP up to 10MB each`}
               </p>
               {uploadedImages.length > 0 && (
                 <div className="grid grid-cols-4 gap-2">
@@ -667,9 +733,14 @@ function VideoGenerator() {
                         }}
                       />
                       {img.isUploading && (
-                        <Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin text-white" />
+                        <Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin text-blue-600" />
                       )}
-                      {img.uploadError && <AlertCircle className="absolute inset-0 m-auto h-5 w-5 text-red-600" />}
+                      {img.uploadSuccess && (
+                        <CheckCircle className="absolute top-1 right-1 h-4 w-4 text-green-600 bg-white rounded-full" />
+                      )}
+                      {img.uploadError && (
+                        <AlertCircle className="absolute top-1 right-1 h-4 w-4 text-red-600 bg-white rounded-full" />
+                      )}
                     </div>
                   ))}
                 </div>

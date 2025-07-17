@@ -10,28 +10,57 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
 
-    // Validate file type
-    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
-      return NextResponse.json({ error: "Invalid file type" }, { status: 400 })
+    // Validate file type - support standard real estate image formats
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    if (!allowedTypes.includes(file.type)) {
+      return NextResponse.json(
+        { error: `Unsupported file type: ${file.type}. Please use JPG, PNG, or WebP.` },
+        { status: 400 },
+      )
     }
 
-    // Validate file size (100MB max)
-    const maxSize = 100 * 1024 * 1024
+    // Validate file size (10MB max per image)
+    const maxSize = 10 * 1024 * 1024 // 10MB
     if (file.size > maxSize) {
-      return NextResponse.json({ error: "File too large" }, { status: 400 })
+      return NextResponse.json(
+        { error: `File too large: ${Math.round(file.size / 1024 / 1024)}MB. Maximum size is 10MB.` },
+        { status: 400 },
+      )
     }
 
-    const blob = await put(file.name, file, {
+    // Generate unique filename with timestamp and random suffix
+    const timestamp = Date.now()
+    const randomSuffix = Math.random().toString(36).substring(2, 8)
+    const fileExtension = file.name.split(".").pop()?.toLowerCase() || "jpg"
+    const filename = `property-${timestamp}-${randomSuffix}.${fileExtension}`
+
+    // Upload to Vercel Blob with public access
+    const blob = await put(filename, file, {
       access: "public",
-      handleUploadUrl: "/api/upload-image",
+      addRandomSuffix: false, // We're adding our own suffix
     })
 
-    return NextResponse.json({ url: blob.url })
+    return NextResponse.json({
+      success: true,
+      url: blob.url,
+      filename: filename,
+      size: file.size,
+      type: file.type,
+      originalName: file.name,
+    })
   } catch (error) {
     console.error("Upload error:", error)
-    return NextResponse.json(
-      { error: "Upload failed", details: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 },
-    )
+
+    // Return specific error messages for different failure types
+    if (error instanceof Error) {
+      if (error.message.includes("blob")) {
+        return NextResponse.json({ error: "Storage service unavailable. Please try again." }, { status: 503 })
+      }
+      if (error.message.includes("network")) {
+        return NextResponse.json({ error: "Network error. Please check your connection." }, { status: 502 })
+      }
+    }
+
+    return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 })
   }
 }
