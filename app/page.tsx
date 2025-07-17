@@ -259,7 +259,7 @@ export default function VideoGenerator() {
     })
   }, [])
 
-  // FIXED: Generate ONLY key property detail captions
+  // FIXED: Generate ONLY key property detail captions with PROPER WORDS and COLORS
   const generatePropertyCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
@@ -273,7 +273,7 @@ export default function VideoGenerator() {
 
       // Only proceed if we have valid data
       if (safeAddress && safePrice > 0 && safeBedrooms > 0 && safeBathrooms > 0 && safeSqft > 0) {
-        // Create property detail captions with specific timing
+        // Create property detail captions with FULL WORDS (no abbreviations)
         const propertyDetails = [
           {
             text: `${safeBedrooms} ${safeBedrooms === 1 ? "BEDROOM" : "BEDROOMS"}`,
@@ -288,7 +288,7 @@ export default function VideoGenerator() {
             duration: 2.5,
           },
           {
-            text: `${safeSqft.toLocaleString()} SQ FT`,
+            text: `${safeSqft.toLocaleString()} SQUARE FEET`,
             type: "sqft" as const,
             startTime: duration * 0.35,
             duration: 2.5,
@@ -510,6 +510,7 @@ export default function VideoGenerator() {
             setProgress(75)
 
             // Step 7: Convert to MP4 (75-95%)
+            console.log("🔄 Converting to MP4...")
             const formData = new FormData()
             formData.append("webm", webmBlob)
 
@@ -519,6 +520,7 @@ export default function VideoGenerator() {
             })
 
             if (!convertResponse.ok) {
+              console.warn("⚠️ MP4 conversion failed, using WebM")
               // Fallback to WebM
               const videoUrl = URL.createObjectURL(webmBlob)
               setVideoUrl(videoUrl)
@@ -535,6 +537,7 @@ export default function VideoGenerator() {
             }
 
             const { mp4Url } = await convertResponse.json()
+            console.log("✅ MP4 conversion successful")
             setProgress(95)
 
             // Auto-download MP4
@@ -601,20 +604,20 @@ export default function VideoGenerator() {
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw property captions
+            // Draw FIXED property captions with PROPER COLORS
             if (currentCaption && currentCaption.text) {
               const fontSize = Math.floor(canvas.width * 0.08)
               ctx.font = `900 ${fontSize}px Arial, sans-serif`
               ctx.textAlign = "center"
 
-              // Caption colors by type
-              let captionColor = "#FFFF00"
-              if (currentCaption.type === "price") captionColor = "#00FF00"
-              if (currentCaption.type === "location") captionColor = "#FF6B6B"
-              if (currentCaption.type === "bedrooms") captionColor = "#4ECDC4"
-              if (currentCaption.type === "bathrooms") captionColor = "#9B59B6"
-              if (currentCaption.type === "sqft") captionColor = "#F39C12"
-              if (currentCaption.type === "feature") captionColor = "#E74C3C"
+              // FIXED CAPTION COLORS - BRIGHT AND VISIBLE
+              let captionColor = "#FFFFFF" // Default white
+              if (currentCaption.type === "price") captionColor = "#00FF00" // Bright green for price
+              if (currentCaption.type === "location") captionColor = "#FF4444" // Bright red for location
+              if (currentCaption.type === "bedrooms") captionColor = "#00CCFF" // Bright cyan for bedrooms
+              if (currentCaption.type === "bathrooms") captionColor = "#FF00FF" // Bright magenta for bathrooms
+              if (currentCaption.type === "sqft") captionColor = "#FFFF00" // Bright yellow for sqft
+              if (currentCaption.type === "feature") captionColor = "#FF8800" // Bright orange for features
 
               const words = currentCaption.text.split(" ")
               const lines: string[] = []
@@ -630,12 +633,12 @@ export default function VideoGenerator() {
               lines.forEach((line, lineIndex) => {
                 const y = startY + lineIndex * lineHeight
 
-                // Black outline
+                // THICK BLACK OUTLINE for readability
                 ctx.strokeStyle = "#000000"
-                ctx.lineWidth = Math.floor(fontSize * 0.15)
+                ctx.lineWidth = Math.floor(fontSize * 0.2)
                 ctx.strokeText(line, canvas.width / 2, y)
 
-                // Colored text
+                // BRIGHT COLORED TEXT
                 ctx.fillStyle = captionColor
                 ctx.fillText(line, canvas.width / 2, y)
               })

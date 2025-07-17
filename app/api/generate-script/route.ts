@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     try {
       const { text } = await generateText({
         model: openai("gpt-4o"),
-        system: `Create viral TikTok real estate scripts. Use conversational tone, spell out numbers as words, include strong hooks and calls-to-action. Keep under 45 seconds when spoken.`,
+        system: `Create viral TikTok real estate scripts. Use conversational tone, spell out numbers as words, include strong hooks and calls-to-action. Keep under 45 seconds when spoken. Always say "square feet" not "sqft".`,
         prompt: `Create a TikTok script for: ${address}, $${safePrice.toLocaleString()}, ${bedroomsText}, ${bathroomsText}, ${safeSqft.toLocaleString()} square feet. ${propertyDescription ? `Features: ${propertyDescription}` : ""} Make it exciting and viral-worthy!`,
       })
 
@@ -63,6 +63,8 @@ export async function POST(request: NextRequest) {
         .replace(/\bBR\b/gi, "bedrooms")
         .replace(/\bBA\b/gi, "bathrooms")
         .replace(/\bsqft\b/gi, "square feet")
+        .replace(/\bSQ FT\b/gi, "square feet")
+        .replace(/\bsq ft\b/gi, "square feet")
         .replace(/\d+/g, (match) => {
           const num = Number.parseInt(match)
           return isNaN(num) ? match : numberToWords(num)
@@ -72,9 +74,7 @@ export async function POST(request: NextRequest) {
     } catch (aiError) {
       console.warn("OpenAI failed, using fallback:", aiError)
 
-      let fallbackScript = `Stop scrolling! This property is about to blow your mind!
-
-Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
+      let fallbackScript = `Stop scrolling! This property is about to blow your mind!\n\nWelcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
 
       if (propertyDescription?.trim()) {
         fallbackScript += `\n\nBut wait, there's more! ${propertyDescription.trim()}`

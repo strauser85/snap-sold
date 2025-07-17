@@ -1,5 +1,7 @@
-import { put } from "@vercel/blob"
 import { type NextRequest, NextResponse } from "next/server"
+import { put } from "@vercel/blob"
+
+export const maxDuration = 30
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,15 +23,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Upload to Vercel Blob
-    const blob = await put(`property-images/${Date.now()}-${file.name}`, file, {
+    const blob = await put(`images/${Date.now()}-${file.name}`, file, {
       access: "public",
       contentType: file.type,
     })
 
-    return NextResponse.json({
-      url: blob.url,
-      success: true,
-    })
+    return NextResponse.json({ url: blob.url })
   } catch (error) {
     console.error("Image upload error:", error)
     return NextResponse.json(
