@@ -18,6 +18,7 @@ interface UploadedImage {
   isUploading?: boolean
   uploadError?: string
   uploadSuccess?: boolean
+  uploadProgress?: number
 }
 
 interface Caption {
@@ -110,24 +111,39 @@ function VideoGenerator() {
     })
   }
 
-  const compressImage = (file: File, maxWidth = 1200, quality = 0.85): Promise<File> => {
+  // Client-side compression to max 1920px longest edge, JPEG 0.85
+  const compressImage = (file: File): Promise<File> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
       const ctx = canvas.getContext("2d")!
       const img = new Image()
 
       img.onload = () => {
-        // Calculate new dimensions while maintaining aspect ratio
-        const ratio = Math.min(maxWidth / img.width, maxWidth / img.height)
-        canvas.width = img.width * ratio
-        canvas.height = img.height * ratio
+        // Calculate new dimensions - max 1920px longest edge
+        const maxSize = 1920
+        let { width, height } = img
 
-        // Draw and compress
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        if (width > height) {
+          if (width > maxSize) {
+            height = (height * maxSize) / width
+            width = maxSize
+          }
+        } else {
+          if (height > maxSize) {
+            width = (width * maxSize) / height
+            height = maxSize
+          }
+        }
+
+        canvas.width = width
+        canvas.height = height
+
+        // Draw and compress to JPEG 0.85 quality
+        ctx.drawImage(img, 0, 0, width, height)
         canvas.toBlob(
           (blob) => {
             if (blob) {
-              const compressedFile = new File([blob], file.name, {
+              const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
                 type: "image/jpeg",
                 lastModified: Date.now(),
               })
@@ -137,7 +153,7 @@ function VideoGenerator() {
             }
           },
           "image/jpeg",
-          quality,
+          0.85,
         )
       }
 
@@ -147,9 +163,13 @@ function VideoGenerator() {
     })
   }
 
+  // Sequential upload with per-image progress
   const uploadSingleImage = async (file: File, id: string): Promise<void> => {
     try {
-      // Validate file before upload
+      // Update progress to show compression
+      setUploadedImages((prev) => prev.map((img) => (img.id === id ? { ...img, uploadProgress: 10 } : img)))
+
+      // Validate and compress file
       if (!ALLOWED_TYPES.includes(file.type)) {
         throw new Error(`Unsupported format. Use JPG, PNG, or WebP only.`)
       }
@@ -159,8 +179,11 @@ function VideoGenerator() {
         throw new Error(`File too large (${sizeMB}MB). Maximum is ${MAX_FILE_SIZE_MB}MB.`)
       }
 
-      // Compress image before upload to reduce size
+      // Compress image before upload
       const compressedFile = await compressImage(file)
+
+      // Update progress to show upload starting
+      setUploadedImages((prev) => prev.map((img) => (img.id === id ? { ...img, uploadProgress: 30 } : img)))
 
       const formData = new FormData()
       formData.append("file", compressedFile)
@@ -186,6 +209,7 @@ function VideoGenerator() {
                 isUploading: false,
                 uploadSuccess: true,
                 uploadError: undefined,
+                uploadProgress: 100,
               }
             : img,
         ),
@@ -200,6 +224,7 @@ function VideoGenerator() {
                 isUploading: false,
                 uploadError: err instanceof Error ? err.message : "Upload failed",
                 uploadSuccess: false,
+                uploadProgress: 0,
               }
             : img,
         ),
@@ -217,45 +242,24 @@ function VideoGenerator() {
       setTimeout(() => setError(null), 5000)
     }
 
-    // Pre-validate files and show immediate feedback
-    const validFiles: File[] = []
-    const invalidFiles: string[] = []
+    // Add files to state immediately for UI feedback
+    const newImages: UploadedImage[] = filesToProcess.map((file, idx) => ({
+      file,
+      previewUrl: URL.createObjectURL(file),
+      id: `img-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 8)}`,
+      isUploading: true,
+      uploadSuccess: false,
+      uploadProgress: 0,
+    }))
 
-    filesToProcess.forEach((file) => {
-      if (!ALLOWED_TYPES.includes(file.type)) {
-        invalidFiles.push(`${file.name}: Unsupported format`)
-      } else if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        const sizeMB = Math.round((file.size / 1024 / 1024) * 10) / 10
-        invalidFiles.push(`${file.name}: Too large (${sizeMB}MB)`)
-      } else {
-        validFiles.push(file)
-      }
-    })
+    setUploadedImages((prev) => [...prev, ...newImages])
 
-    // Show validation errors if any
-    if (invalidFiles.length > 0) {
-      setError(
-        `Skipped files: ${invalidFiles.slice(0, 3).join(", ")}${invalidFiles.length > 3 ? ` and ${invalidFiles.length - 3} more` : ""}`,
-      )
-      setTimeout(() => setError(null), 8000)
+    // Upload sequentially to avoid overwhelming the server
+    for (const img of newImages) {
+      await uploadSingleImage(img.file, img.id)
+      // Small delay between uploads
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
-
-    // Add valid files to state and start parallel uploads
-    validFiles.forEach(async (file, idx) => {
-      const id = `img-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 8)}`
-      const newImg: UploadedImage = {
-        file,
-        previewUrl: URL.createObjectURL(file),
-        id,
-        isUploading: true,
-        uploadSuccess: false,
-      }
-
-      setUploadedImages((prev) => [...prev, newImg])
-
-      // Start upload (parallel processing - don't await)
-      uploadSingleImage(file, id)
-    })
 
     // Clear the input to allow re-uploading same files
     e.target.value = ""
@@ -309,7 +313,7 @@ function VideoGenerator() {
     }
   }
 
-  // KEY FEATURE CAPTIONS ONLY (NOT FULL SCRIPT)
+  // FEATURE-ONLY CAPTIONS (NOT FULL SCRIPT)
   const createFeatureCaptions = (duration: number): Caption[] => {
     const caps: Caption[] = []
 
@@ -357,7 +361,7 @@ function VideoGenerator() {
         type: "location",
       })
 
-    // Extract unique amenities from description
+    // Extract unique amenities from description (detached shop, corner lot, etc.)
     if (propertyDescription) {
       const uniqueFeatures = propertyDescription
         .toLowerCase()
@@ -543,13 +547,13 @@ function VideoGenerator() {
           // SILENT CANVAS DRAW FAILURE
         }
 
-        // Draw KEY FEATURE CAPTIONS ONLY (Bright Yellow #FFD700)
+        // Draw FEATURE-ONLY CAPTIONS (Bright Yellow #FFD700, lower-third safe zone)
         captions.forEach((c) => {
           if (sec >= c.startTime && sec <= c.endTime) {
             ctx.font = "bold 72px Arial"
             ctx.textAlign = "center"
             ctx.lineWidth = 12
-            ctx.strokeStyle = "#000000"
+            ctx.strokeStyle = "#000000" // Black outline
             ctx.fillStyle = "#FFD700" // Bright Yellow
 
             const y = canvas.height - 300 // Lower third positioning
@@ -589,7 +593,7 @@ function VideoGenerator() {
 
         setProgress(90)
 
-        // Convert to MP4 H.264/AAC (REQUIRED FORMAT)
+        // Convert to MP4 H.264/AAC (REQUIRED FORMAT - 1080x1920, 30fps)
         try {
           const conv = await fetch("/api/convert-to-mp4", {
             method: "POST",
@@ -701,7 +705,7 @@ function VideoGenerator() {
             </div>
 
             <div>
-              <Label htmlFor="desc">📝 Property Description & Key Features (Optional)</Label>
+              <Label htmlFor="desc">📝 Property Description & Key Features</Label>
               <Textarea
                 id="desc"
                 rows={3}
@@ -723,7 +727,7 @@ function VideoGenerator() {
               />
               <p className="text-sm text-gray-500">
                 {uploaded} uploaded, {uploading} uploading, {failed} failed
-                {uploadedImages.length > 0 && ` • JPG, PNG, WebP up to ${MAX_FILE_SIZE_MB}MB each`}
+                {uploadedImages.length > 0 && ` • Auto-compressed to max 1920px, JPG quality 85%`}
               </p>
               {uploadedImages.length > 0 && (
                 <div className="grid grid-cols-4 gap-2">
@@ -740,7 +744,12 @@ function VideoGenerator() {
                         }}
                       />
                       {img.isUploading && (
-                        <Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin text-blue-600" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded">
+                          <Loader2 className="h-5 w-5 animate-spin text-white" />
+                          {img.uploadProgress && (
+                            <span className="absolute bottom-1 left-1 text-xs text-white">{img.uploadProgress}%</span>
+                          )}
+                        </div>
                       )}
                       {img.uploadSuccess && (
                         <CheckCircle className="absolute top-1 right-1 h-4 w-4 text-green-600 bg-white rounded-full" />
@@ -759,7 +768,7 @@ function VideoGenerator() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="generated-script">AI-Generated TikTok Script</Label>
+                <Label htmlFor="generated-script">AI-Generated Script (~35s target)</Label>
                 <Button
                   onClick={generateAIScript}
                   disabled={isGeneratingScript || isGenerating}
@@ -784,7 +793,7 @@ function VideoGenerator() {
                 id="generated-script"
                 value={generatedScript}
                 onChange={(e) => setGeneratedScript(e.target.value)}
-                placeholder="Click 'Generate Script' to create an AI-powered TikTok script with natural number pronunciation..."
+                placeholder="Click 'Generate Script' to create a voiceover-ready script with natural number pronunciation..."
                 className="min-h-[120px]"
                 disabled={isGenerating}
               />
@@ -851,7 +860,9 @@ function VideoGenerator() {
 
             {/* NO VIDEO PREVIEW - JUST FORMAT INFO */}
             {videoUrl && (
-              <div className="text-center text-sm text-gray-500">Video format: MP4 (H.264/AAC) • 1080x1920 • 30fps</div>
+              <div className="text-center text-sm text-gray-500">
+                Video format: MP4 (H.264/AAC) • 1080x1920 • 30fps • Rachel voice
+              </div>
             )}
           </CardContent>
         </Card>

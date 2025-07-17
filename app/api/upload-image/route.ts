@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate file size (10MB max per image)
+    // Validate file size (10MB max per image after compression)
     const maxSize = 10 * 1024 * 1024 // 10MB
     if (file.size > maxSize) {
       const fileSizeMB = Math.round((file.size / 1024 / 1024) * 10) / 10
@@ -53,10 +53,11 @@ export async function POST(request: NextRequest) {
     const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_")
     const filename = `property-${timestamp}-${randomSuffix}-${cleanFileName}`
 
-    // Upload to Vercel Blob with public access
+    // Direct streaming upload to Vercel Blob with public access
     const blob = await put(filename, file, {
       access: "public",
       addRandomSuffix: false,
+      contentType: file.type,
     })
 
     return NextResponse.json({
@@ -72,6 +73,14 @@ export async function POST(request: NextRequest) {
 
     // Return specific error messages for different failure types
     if (error instanceof Error) {
+      if (error.message.includes("413") || error.message.includes("Content Too Large")) {
+        return NextResponse.json(
+          {
+            error: "File size exceeds server limits. Please compress images before uploading.",
+          },
+          { status: 413 },
+        )
+      }
       if (error.message.includes("blob") || error.message.includes("storage")) {
         return NextResponse.json(
           {
@@ -86,14 +95,6 @@ export async function POST(request: NextRequest) {
             error: "Network timeout. Please check your connection and try again.",
           },
           { status: 502 },
-        )
-      }
-      if (error.message.includes("size") || error.message.includes("limit")) {
-        return NextResponse.json(
-          {
-            error: "File size exceeds server limits. Please use smaller images.",
-          },
-          { status: 413 },
         )
       }
     }

@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { fal } from "@fal-ai/serverless-client"
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,42 +8,54 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No WebM URL provided" }, { status: 400 })
     }
 
+    // Check if Fal API key exists
     if (!process.env.FAL_KEY) {
-      return NextResponse.json({ error: "FAL API key not configured" }, { status: 500 })
+      console.error("FAL_KEY not found in environment variables")
+      return NextResponse.json({ error: "Video conversion service not configured" }, { status: 500 })
     }
 
-    // Configure FAL client
-    fal.config({
-      credentials: process.env.FAL_KEY,
-    })
+    console.log("Converting WebM to MP4:", webmUrl)
 
-    // Convert WebM to MP4 using FAL
-    const result = await fal.subscribe("fal-ai/video-to-video", {
-      input: {
+    // Use Fal AI for video conversion
+    const response = await fetch("https://fal.run/fal-ai/video-converter", {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${process.env.FAL_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         video_url: webmUrl,
         output_format: "mp4",
-        codec: "h264",
+        video_codec: "h264",
         audio_codec: "aac",
-        quality: "high",
-        max_file_size_mb: 100,
-      },
-      logs: true,
-      onQueueUpdate: (update) => {
-        console.log("Queue update:", update)
-      },
+        resolution: "1080x1920",
+        frame_rate: 30,
+        bitrate: "5000k",
+      }),
     })
 
-    if (!result.data?.video?.url) {
-      throw new Error("No MP4 URL returned from conversion")
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error("Fal conversion error:", response.status, errorText)
+      return NextResponse.json({ error: "Video conversion failed" }, { status: response.status })
+    }
+
+    const result = await response.json()
+
+    if (!result.video_url) {
+      return NextResponse.json({ error: "No converted video URL returned" }, { status: 500 })
     }
 
     return NextResponse.json({
-      mp4Url: result.data.video.url,
+      mp4Url: result.video_url,
       originalUrl: webmUrl,
-      fileSize: result.data.video.file_size || 0,
+      format: "mp4",
+      codec: "h264/aac",
+      resolution: "1080x1920",
+      frameRate: 30,
     })
   } catch (error) {
     console.error("MP4 conversion error:", error)
-    return NextResponse.json({ error: "MP4 conversion failed. Please try again." }, { status: 500 })
+    return NextResponse.json({ error: "Video conversion failed" }, { status: 500 })
   }
 }
