@@ -5,10 +5,27 @@ export async function POST(request: NextRequest) {
     const { script } = await request.json()
 
     if (!script) {
-      return NextResponse.json({ error: "No script provided" }, { status: 400 })
+      return NextResponse.json({ error: "Script is required" }, { status: 400 })
     }
 
-    // Use ElevenLabs API
+    // Clean script for better pronunciation
+    const cleanedScript = script
+      .replace(/\bDr\b/g, "Drive")
+      .replace(/\bSt\b/g, "Street")
+      .replace(/\bAve\b/g, "Avenue")
+      .replace(/\bBlvd\b/g, "Boulevard")
+      .replace(/\bRd\b/g, "Road")
+      .replace(/\bLn\b/g, "Lane")
+      .replace(/\bCt\b/g, "Court")
+      .replace(/\bPkwy\b/g, "Parkway")
+      .replace(/\bCir\b/g, "Circle")
+      .replace(/\bTer\b/g, "Terrace")
+      .replace(/\bPl\b/g, "Place")
+      .replace(/\bBR\b/g, "bedroom")
+      .replace(/\bBA\b/g, "bathroom")
+      .replace(/\bsqft\b/gi, "square feet")
+      .replace(/\bSQ FT\b/gi, "square feet")
+
     const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/pNInz6obpgDQGcFmaJgB", {
       method: "POST",
       headers: {
@@ -17,11 +34,13 @@ export async function POST(request: NextRequest) {
         "xi-api-key": process.env.ELEVENLABS_API_KEY!,
       },
       body: JSON.stringify({
-        text: script,
-        model_id: "eleven_monolingual_v1",
+        text: cleanedScript,
+        model_id: "eleven_multilingual_v2",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.5,
+          similarity_boost: 0.75,
+          style: 0.0,
+          use_speaker_boost: true,
         },
       }),
     })
@@ -31,35 +50,28 @@ export async function POST(request: NextRequest) {
     }
 
     const audioBuffer = await response.arrayBuffer()
+    const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" })
 
     // Upload audio to blob storage
-    const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" })
-    const formData = new FormData()
-    formData.append("file", audioBlob, "audio.mp3")
-
-    const uploadResponse = await fetch(`${request.nextUrl.origin}/api/upload-image`, {
-      method: "POST",
-      body: formData,
+    const { put } = await import("@vercel/blob")
+    const blob = await put(`audio-${Date.now()}.mp3`, audioBlob, {
+      access: "public",
     })
 
-    if (!uploadResponse.ok) {
-      throw new Error("Audio upload failed")
-    }
-
-    const { url: audioUrl } = await uploadResponse.json()
-
-    // Estimate duration (rough calculation: ~150 words per minute)
-    const wordCount = script.split(" ").length
-    const estimatedDuration = Math.max(10, (wordCount / 150) * 60)
+    // Get audio duration (estimate based on text length)
+    const estimatedDuration = Math.max(10, Math.min(30, cleanedScript.length / 10))
 
     return NextResponse.json({
-      audioUrl,
+      audioUrl: blob.url,
       duration: estimatedDuration,
     })
   } catch (error) {
     console.error("Audio generation error:", error)
     return NextResponse.json(
-      { error: "Audio generation failed", details: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: "Audio generation failed",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }

@@ -59,7 +59,7 @@ export default function VideoGenerator() {
 
   const MAX_IMAGES = 30
 
-  const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
+  const compressImage = (file: File, maxWidth = 1200, quality = 0.7): Promise<File> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
       const ctx = canvas.getContext("2d")!
@@ -98,8 +98,17 @@ export default function VideoGenerator() {
     })
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Upload failed")
+      const errorText = await response.text()
+      let errorMessage = "Upload failed"
+
+      try {
+        const errorData = JSON.parse(errorText)
+        errorMessage = errorData.error || errorMessage
+      } catch {
+        errorMessage = `Upload failed (${response.status})`
+      }
+
+      throw new Error(errorMessage)
     }
 
     const data = await response.json()
@@ -132,6 +141,7 @@ export default function VideoGenerator() {
             prev.map((img) => (img.id === imageId ? { ...img, blobUrl, isUploading: false } : img)),
           )
         } catch (error) {
+          console.error("Upload error for image:", imageId, error)
           setUploadedImages((prev) =>
             prev.map((img) =>
               img.id === imageId
@@ -412,7 +422,7 @@ export default function VideoGenerator() {
 
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: "video/webm;codecs=vp9,opus",
-        videoBitsPerSecond: 2500000,
+        videoBitsPerSecond: 2000000,
         audioBitsPerSecond: 128000,
       })
 
@@ -450,7 +460,7 @@ export default function VideoGenerator() {
             })
 
             if (!uploadResponse.ok) {
-              throw new Error("Upload failed")
+              throw new Error("Video upload failed")
             }
 
             const { url: webmUrl } = await uploadResponse.json()
@@ -540,7 +550,7 @@ export default function VideoGenerator() {
               ctx.font = `900 ${fontSize}px Arial, sans-serif`
               ctx.textAlign = "center"
 
-              // ALL CAPTIONS ARE NOW BRIGHT YELLOW
+              // ALL CAPTIONS ARE BRIGHT YELLOW
               const captionColor = "#FFFF00"
 
               const words = currentCaption.text.split(" ")
@@ -761,7 +771,9 @@ export default function VideoGenerator() {
               {failedCount > 0 && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{failedCount} image(s) failed to upload.</AlertDescription>
+                  <AlertDescription>
+                    {failedCount} image(s) failed to upload. Try again or use smaller images.
+                  </AlertDescription>
                 </Alert>
               )}
 

@@ -10,14 +10,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
 
-    // Upload to Vercel Blob
-    const blob = await put(file.name, file, {
+    // Validate file type
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      return NextResponse.json({ error: "File must be an image or video" }, { status: 400 })
+    }
+
+    // Upload to Vercel Blob with unique filename
+    const timestamp = Date.now()
+    const randomId = Math.random().toString(36).substring(2, 15)
+    const filename = `${timestamp}-${randomId}-${file.name}`
+
+    const blob = await put(filename, file, {
       access: "public",
+      addRandomSuffix: false,
     })
 
-    return NextResponse.json({ url: blob.url })
+    return NextResponse.json({
+      url: blob.url,
+      filename: filename,
+      size: file.size,
+      type: file.type,
+    })
   } catch (error) {
     console.error("Upload error:", error)
-    return NextResponse.json({ error: "Upload failed" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Upload failed",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }
