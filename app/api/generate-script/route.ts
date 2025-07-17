@@ -1,8 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { generateText } from "ai"
-import { openai } from "@ai-sdk/openai"
 
-// Street abbreviations for natural pronunciation
 const STREET_ABBREVIATIONS: Record<string, string> = {
   Dr: "Drive",
   dr: "Drive",
@@ -27,22 +24,26 @@ const STREET_ABBREVIATIONS: Record<string, string> = {
 }
 
 function expandStreetAbbreviations(address: string): string {
-  if (!address) return ""
   return address
     .split(" ")
-    .map((word) => STREET_ABBREVIATIONS[word] || word)
+    .map((word) => STREET_ABBREVIATIONS[word] ?? word)
     .join(" ")
 }
 
-function formatNumbersForSpeech(text: string): string {
-  if (!text) return ""
-  return text
-    .replace(/\b(\d+)\.5\b/g, "$1 and a half")
-    .replace(/\b1\.5\b/g, "one and a half")
-    .replace(/\b2\.5\b/g, "two and a half")
-    .replace(/\b3\.5\b/g, "three and a half")
-    .replace(/\b4\.5\b/g, "four and a half")
-    .replace(/\b5\.5\b/g, "five and a half")
+function formatNumberForSpeech(num: number): string {
+  if (num === Math.floor(num)) {
+    return num.toString()
+  }
+
+  const parts = num.toString().split(".")
+  const whole = Number.parseInt(parts[0])
+  const decimal = parts[1]
+
+  if (decimal === "5") {
+    return `${whole} and a half`
+  }
+
+  return num.toString()
 }
 
 export async function POST(request: NextRequest) {
@@ -50,16 +51,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = body
 
-    // Validate required fields
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
-      return NextResponse.json({ error: "All property details are required" }, { status: 400 })
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
     const expandedAddress = expandStreetAbbreviations(address)
-    const numPrice = Number(price) || 0
-    const numSqft = Number(sqft) || 0
-    const numBedrooms = Number(bedrooms) || 0
-    const numBathrooms = Number(bathrooms) || 0
+    const bedroomText = formatNumberForSpeech(Number(bedrooms))
+    const bathroomText = formatNumberForSpeech(Number(bathrooms))
+    const priceFormatted = Number(price).toLocaleString()
+    const sqftFormatted = Number(sqft).toLocaleString()
 
     let script = ""
     let method = "Template"
@@ -67,69 +67,88 @@ export async function POST(request: NextRequest) {
     // Try OpenAI first if API key is available
     if (process.env.OPENAI_API_KEY) {
       try {
-        const prompt = `Create a compelling 30-45 second TikTok script for a real estate listing:
-
+        const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a professional real estate marketing expert. Create engaging, viral TikTok scripts for property listings. Keep scripts under 60 seconds when spoken. Use natural, conversational language that builds excitement and urgency.",
+              },
+              {
+                role: "user",
+                content: `Create a TikTok script for this property:
 Address: ${expandedAddress}
-Price: $${numPrice.toLocaleString()}
-Bedrooms: ${numBedrooms}
-Bathrooms: ${numBathrooms}
-Square Feet: ${numSqft.toLocaleString()}
-${propertyDescription ? `Description: ${propertyDescription}` : ""}
-Images: ${imageCount || 0} photos available
+Price: $${priceFormatted}
+Bedrooms: ${bedroomText}
+Bathrooms: ${bathroomText}
+Square Feet: ${sqftFormatted}
+Description: ${propertyDescription || "Beautiful home"}
+Images: ${imageCount} photos
 
-Requirements:
-- Engaging hook in first 3 seconds
-- Highlight key features and price
-- Create urgency and excitement
-- Natural conversational tone
-- 30-45 seconds when spoken
-- Use "and a half" for .5 numbers
-
-Write only the script text, no stage directions.`
-
-        const { text } = await generateText({
-          model: openai("gpt-4o"),
-          prompt,
-          maxTokens: 300,
+Make it exciting and viral-worthy. Use natural speech patterns. When saying numbers like 1.5, say "one and a half".`,
+              },
+            ],
+            max_tokens: 500,
+            temperature: 0.7,
+          }),
         })
 
-        script = formatNumbersForSpeech(text.trim())
-        method = "OpenAI"
-      } catch (error) {
-        console.warn("OpenAI failed, using template:", error)
-        // Continue to fallback template
+        if (openaiResponse.ok) {
+          const openaiData = await openaiResponse.json()
+          script = openaiData.choices[0]?.message?.content || ""
+          method = "OpenAI"
+        }
+      } catch (openaiError) {
+        console.warn("OpenAI failed, using template:", openaiError)
       }
     }
 
-    // Fallback template if OpenAI fails or no API key
+    // Fallback to template if OpenAI failed or no API key
     if (!script) {
-      const bathroomText =
-        numBathrooms === 1
-          ? "bathroom"
-          : numBathrooms.toString().includes(".5")
-            ? `${numBathrooms.toString().replace(".5", " and a half")} bathrooms`
-            : `${numBathrooms} bathrooms`
+      const features = propertyDescription
+        ? propertyDescription
+            .split(/[,.!;]/)
+            .slice(0, 2)
+            .map((f) => f.trim())
+            .filter((f) => f.length > 0)
+        : []
 
-      const bedroomText = numBedrooms === 1 ? "bedroom" : `${numBedrooms} bedrooms`
+      script = `🏠 STUNNING ${bedroomText.toUpperCase()} BEDROOM HOME ALERT! 
 
-      script = `🏠 STUNNING ${bedroomText.toUpperCase()}, ${bathroomText.toUpperCase()} HOME! 
+Located at ${expandedAddress}, this incredible property is priced at just $${priceFormatted}!
 
-Located at ${expandedAddress}, this gorgeous ${numSqft.toLocaleString()} square foot property is priced at just $${numPrice.toLocaleString()}!
+✨ Here's what makes this home special:
+• ${bedroomText} spacious bedrooms
+• ${bathroomText} beautiful bathrooms  
+• ${sqftFormatted} square feet of living space
+${features.length > 0 ? `• ${features.join("\n• ")}` : ""}
 
-${propertyDescription ? `Featuring ${propertyDescription.toLowerCase()}, ` : ""}This home offers incredible value in today's market.
+This won't last long at this price! Properties like this in this area are selling FAST. 
 
-${bedroomText} and ${bathroomText} provide perfect space for your family. At ${numSqft.toLocaleString()} square feet, you'll have room to grow and thrive.
+💰 At $${priceFormatted}, you're getting incredible value for ${sqftFormatted} square feet.
 
-Don't wait - homes like this don't last long! Contact me today to schedule your private showing. This could be YOUR dream home! 
+Ready to see it? Comment "INFO" below or DM me now! 
 
-#RealEstate #DreamHome #ForSale #NewListing`
-
-      script = formatNumbersForSpeech(script)
+#RealEstate #HomeSweetHome #PropertyTour #DreamHome #RealEstateAgent`
     }
 
     return NextResponse.json({
-      script: script || "Unable to generate script. Please try again.",
+      script: script.trim(),
       method,
+      expandedAddress,
+      formattedNumbers: {
+        bedrooms: bedroomText,
+        bathrooms: bathroomText,
+        price: priceFormatted,
+        sqft: sqftFormatted,
+      },
     })
   } catch (error) {
     console.error("Script generation error:", error)

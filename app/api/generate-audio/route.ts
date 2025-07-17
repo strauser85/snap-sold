@@ -5,17 +5,17 @@ export async function POST(request: NextRequest) {
     const { script } = await request.json()
 
     if (!script) {
-      return NextResponse.json({ error: "Script is required" }, { status: 400 })
+      return NextResponse.json({ error: "No script provided" }, { status: 400 })
     }
 
     if (!process.env.ELEVENLABS_API_KEY) {
       return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
     }
 
-    // Rachel voice ID (locked)
-    const voiceId = "21m00Tcm4TlvDq8ikWAM"
+    // LOCKED Rachel voice ID
+    const RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${RACHEL_VOICE_ID}`, {
       method: "POST",
       headers: {
         Accept: "audio/mpeg",
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.5,
+          similarity_boost: 0.75,
           style: 0.0,
           use_speaker_boost: true,
         },
@@ -36,20 +36,29 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("ElevenLabs API error:", errorText)
-      return NextResponse.json({ error: "Audio generation failed" }, { status: 500 })
+      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`)
     }
 
     const audioBuffer = await response.arrayBuffer()
 
+    // Estimate duration (rough calculation: ~150 words per minute)
+    const wordCount = script.split(/\s+/).length
+    const estimatedDuration = Math.max(10, (wordCount / 150) * 60)
+
     return new NextResponse(audioBuffer, {
       headers: {
         "Content-Type": "audio/mpeg",
-        "Content-Length": audioBuffer.byteLength.toString(),
+        "X-Audio-Duration": estimatedDuration.toString(),
       },
     })
   } catch (error) {
     console.error("Audio generation error:", error)
-    return NextResponse.json({ error: "Audio generation failed" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Audio generation failed",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }
