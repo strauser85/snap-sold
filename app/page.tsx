@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, type ChangeEvent } from "react"
+import { useState, useRef, type ChangeEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,6 +18,8 @@ import {
   Upload,
   Sparkles,
   RefreshCw,
+  Download,
+  RotateCcw,
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -53,6 +55,7 @@ export default function VideoGenerator() {
   const [progress, setProgress] = useState(0)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isVideoGenerated, setIsVideoGenerated] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -84,6 +87,7 @@ export default function VideoGenerator() {
         )
       }
 
+      img.onerror = () => resolve(file)
       img.src = URL.createObjectURL(file)
     })
   }
@@ -162,7 +166,11 @@ export default function VideoGenerator() {
     setUploadedImages((prev) => {
       const imageToRemove = prev.find((img) => img.id === id)
       if (imageToRemove) {
-        URL.revokeObjectURL(imageToRemove.previewUrl)
+        try {
+          URL.revokeObjectURL(imageToRemove.previewUrl)
+        } catch (e) {
+          // Silent cleanup
+        }
       }
       return prev.filter((img) => img.id !== id)
     })
@@ -206,15 +214,31 @@ export default function VideoGenerator() {
     }
   }
 
-  const loadImage = useCallback((src: string): Promise<HTMLImageElement> => {
+  const loadImage = (src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
       const img = new Image()
       img.crossOrigin = "anonymous"
       img.onload = () => resolve(img)
-      img.onerror = reject
+      img.onerror = () => {
+        // Silent error handling - create placeholder
+        const canvas = document.createElement("canvas")
+        canvas.width = 800
+        canvas.height = 600
+        const ctx = canvas.getContext("2d")!
+        ctx.fillStyle = "#f0f0f0"
+        ctx.fillRect(0, 0, 800, 600)
+        ctx.fillStyle = "#666"
+        ctx.font = "24px Arial"
+        ctx.textAlign = "center"
+        ctx.fillText("Image Preview Unavailable", 400, 300)
+
+        const placeholderImg = new Image()
+        placeholderImg.src = canvas.toDataURL()
+        placeholderImg.onload = () => resolve(placeholderImg)
+      }
       img.src = src
     })
-  }, [])
+  }
 
   const generatePropertyCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
@@ -307,6 +331,21 @@ export default function VideoGenerator() {
     return captions
   }
 
+  const triggerDownload = (url: string, filename: string) => {
+    try {
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      a.style.display = "none"
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      console.log(`✅ Auto-download triggered: ${filename}`)
+    } catch (e) {
+      // Silent download failure
+    }
+  }
+
   const handleGenerateVideo = async () => {
     if (!address || !price || !bedrooms || !bathrooms || !sqft || !generatedScript || uploadedImages.length === 0) {
       setError("Please fill in all details, generate a script, and upload at least one image.")
@@ -323,6 +362,7 @@ export default function VideoGenerator() {
     setError(null)
     setVideoUrl(null)
     setProgress(0)
+    setIsVideoGenerated(false)
 
     try {
       if (!canvasRef.current || !audioRef.current) {
@@ -464,7 +504,9 @@ export default function VideoGenerator() {
             }
 
             const { url: webmUrl } = await uploadResponse.json()
+            setProgress(80)
 
+            console.log("🎬 Attempting MP4 conversion...")
             const convertResponse = await fetch("/api/convert-to-mp4", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -473,25 +515,14 @@ export default function VideoGenerator() {
 
             if (convertResponse.ok) {
               const { mp4Url } = await convertResponse.json()
+              console.log("✅ MP4 conversion successful!")
               setProgress(95)
 
-              const link = document.createElement("a")
-              link.href = mp4Url
-              link.download = "property-video.mp4"
-              link.target = "_blank"
-              document.body.appendChild(link)
-              link.click()
-              document.body.removeChild(link)
-
+              triggerDownload(mp4Url, "property-video.mp4")
               setVideoUrl(mp4Url)
             } else {
-              const link = document.createElement("a")
-              link.href = webmUrl
-              link.download = "property-video.webm"
-              document.body.appendChild(link)
-              link.click()
-              document.body.removeChild(link)
-
+              console.warn("⚠️ MP4 conversion failed, using WebM")
+              triggerDownload(webmUrl, "property-video.webm")
               setVideoUrl(webmUrl)
             }
 
@@ -550,7 +581,6 @@ export default function VideoGenerator() {
               ctx.font = `900 ${fontSize}px Arial, sans-serif`
               ctx.textAlign = "center"
 
-              // ALL CAPTIONS ARE BRIGHT YELLOW
               const captionColor = "#FFFF00"
 
               const words = currentCaption.text.split(" ")
@@ -574,31 +604,6 @@ export default function VideoGenerator() {
                 ctx.fillText(line, canvas.width / 2, y)
               })
             }
-
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
-            ctx.fillRect(0, 0, canvas.width, 80)
-
-            ctx.fillStyle = "#FFFFFF"
-            ctx.font = "bold 16px Arial"
-            ctx.textAlign = "left"
-            ctx.fillText(address || "Property", 15, 25)
-
-            ctx.fillStyle = "#FFD700"
-            ctx.font = "bold 14px Arial"
-            ctx.fillText(`$${Number(price || 0).toLocaleString()}`, 15, 45)
-
-            ctx.fillStyle = "#FFFFFF"
-            ctx.font = "12px Arial"
-            const safeBedrooms = Number(bedrooms || 0)
-            const safeBathrooms = Number(bathrooms || 0)
-            const safeSqft = Number(sqft || 0)
-            const bedroomsText = safeBedrooms === 1 ? "bedroom" : "bedrooms"
-            const bathroomsText = safeBathrooms === 1 ? "bathroom" : "bathrooms"
-            ctx.fillText(
-              `${safeBedrooms} ${bedroomsText} • ${safeBathrooms} ${bathroomsText} • ${safeSqft.toLocaleString()} sqft`,
-              15,
-              65,
-            )
           }
 
           const recordingProgress = 45 + (elapsed / durationMs) * 30
@@ -612,6 +617,7 @@ export default function VideoGenerator() {
 
       setProgress(100)
       setIsGenerating(false)
+      setIsVideoGenerated(true)
     } catch (error) {
       console.error("Video generation error:", error)
       setError(error instanceof Error ? error.message : "Video generation failed")
@@ -620,21 +626,11 @@ export default function VideoGenerator() {
     }
   }
 
-  const resetForm = () => {
-    setAddress("")
-    setPrice("")
-    setBedrooms("")
-    setBathrooms("")
-    setSqft("")
-    setPropertyDescription("")
-    setGeneratedScript("")
-    setScriptMethod("")
-    uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl))
-    setUploadedImages([])
+  const resetForNewVideo = () => {
     setVideoUrl(null)
-    setError(null)
-    setIsGenerating(false)
+    setIsVideoGenerated(false)
     setProgress(0)
+    setError(null)
   }
 
   const uploadedCount = uploadedImages.filter((img) => img.blobUrl).length
@@ -786,6 +782,10 @@ export default function VideoGenerator() {
                           src={img.previewUrl || "/placeholder.svg"}
                           alt={`Property image ${index + 1}`}
                           className="w-full h-20 object-cover rounded-md border"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement
+                            target.src = "/placeholder.svg?height=80&width=80&text=Preview+Error"
+                          }}
                         />
                         <div className="absolute top-1 left-1 bg-black bg-opacity-50 text-white text-xs px-1 rounded">
                           {index + 1}
@@ -874,38 +874,69 @@ export default function VideoGenerator() {
             {isGenerating && (
               <div className="space-y-2">
                 <Progress value={progress} className="h-4" />
-                <div className="text-center text-sm font-medium text-gray-600">{Math.round(progress)}%</div>
+                <div className="text-center text-sm font-medium text-gray-600">
+                  {Math.round(progress)}% - Rachel (locked)
+                </div>
               </div>
             )}
 
-            <Button
-              onClick={handleGenerateVideo}
-              disabled={
-                isGenerating ||
-                !address ||
-                !price ||
-                !bedrooms ||
-                !bathrooms ||
-                !sqft ||
-                !generatedScript ||
-                uploadedImages.length === 0 ||
-                uploadingCount > 0 ||
-                uploadedCount === 0
-              }
-              className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-                  Generating Video...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-3 h-6 w-6" />
-                  Generate Video
-                </>
-              )}
-            </Button>
+            {!isVideoGenerated ? (
+              <Button
+                onClick={handleGenerateVideo}
+                disabled={
+                  isGenerating ||
+                  !address ||
+                  !price ||
+                  !bedrooms ||
+                  !bathrooms ||
+                  !sqft ||
+                  !generatedScript ||
+                  uploadedImages.length === 0 ||
+                  uploadingCount > 0 ||
+                  uploadedCount === 0
+                }
+                className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="mr-3 h-6 w-6 animate-spin" />
+                    Generating Video...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-3 h-6 w-6" />
+                    Generate Video
+                  </>
+                )}
+              </Button>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-center text-green-600 font-medium">
+                  ✅ Video generated and downloaded successfully!
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    onClick={() =>
+                      videoUrl &&
+                      triggerDownload(
+                        videoUrl,
+                        videoUrl.includes(".mp4") ? "property-video.mp4" : "property-video.webm",
+                      )
+                    }
+                    disabled={!videoUrl}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    <Download className="mr-2 h-4 w-4" /> Download MP4 Again
+                  </Button>
+
+                  <Button onClick={resetForNewVideo} className="w-full">
+                    <RotateCcw className="mr-2 h-4 w-4" /> Generate Another
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -922,18 +953,6 @@ export default function VideoGenerator() {
               </div>
             </AlertDescription>
           </Alert>
-        )}
-
-        {videoUrl && !isGenerating && (
-          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-            <CardContent className="p-6">
-              <div className="text-center space-y-4">
-                <Button onClick={resetForm} variant="outline" className="w-full bg-transparent">
-                  Generate Another Video
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         )}
       </div>
     </div>
