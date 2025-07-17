@@ -102,17 +102,8 @@ export default function VideoGenerator() {
     })
 
     if (!response.ok) {
-      const errorText = await response.text()
-      let errorMessage = "Upload failed"
-
-      try {
-        const errorData = JSON.parse(errorText)
-        errorMessage = errorData.error || errorMessage
-      } catch {
-        errorMessage = `Upload failed (${response.status})`
-      }
-
-      throw new Error(errorMessage)
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Upload failed (${response.status})`)
     }
 
     const data = await response.json()
@@ -215,7 +206,7 @@ export default function VideoGenerator() {
   }
 
   const loadImage = (src: string): Promise<HTMLImageElement> => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const img = new Image()
       img.crossOrigin = "anonymous"
       img.onload = () => resolve(img)
