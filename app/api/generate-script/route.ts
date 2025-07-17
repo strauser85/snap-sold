@@ -32,14 +32,111 @@ function expandStreetAbbreviations(address: string): string {
     .join(" ")
 }
 
-function formatNumbersForSpeech(text: string): string {
-  return text
-    .replace(/\b(\d+)\.5\b/g, "$1 and a half")
-    .replace(/\b1\.5\b/g, "one and a half")
-    .replace(/\b2\.5\b/g, "two and a half")
-    .replace(/\b3\.5\b/g, "three and a half")
-    .replace(/\b4\.5\b/g, "four and a half")
-    .replace(/\b5\.5\b/g, "five and a half")
+function convertNumbersToNaturalSpeech(text: string): string {
+  return (
+    text
+      // Handle decimal numbers first
+      .replace(/\b(\d+)\.5\b/g, "$1 and a half")
+      .replace(/\b1\.5\b/g, "one and a half")
+      .replace(/\b2\.5\b/g, "two and a half")
+      .replace(/\b3\.5\b/g, "three and a half")
+      .replace(/\b4\.5\b/g, "four and a half")
+      .replace(/\b5\.5\b/g, "five and a half")
+      // Handle large numbers
+      .replace(/\b(\d{1,3}),(\d{3}),(\d{3})\b/g, (match, millions, thousands, hundreds) => {
+        const millionNum = Number.parseInt(millions)
+        const thousandNum = Number.parseInt(thousands)
+        const hundredNum = Number.parseInt(hundreds)
+
+        let result = ""
+        if (millionNum > 0) {
+          result += numberToWords(millionNum) + " million "
+        }
+        if (thousandNum > 0) {
+          result += numberToWords(thousandNum) + " thousand "
+        }
+        if (hundredNum > 0) {
+          result += numberToWords(hundredNum)
+        }
+        return result.trim()
+      })
+      // Handle thousands
+      .replace(/\b(\d{1,3}),(\d{3})\b/g, (match, thousands, hundreds) => {
+        const thousandNum = Number.parseInt(thousands)
+        const hundredNum = Number.parseInt(hundreds)
+
+        let result = ""
+        if (thousandNum > 0) {
+          result += numberToWords(thousandNum) + " thousand "
+        }
+        if (hundredNum > 0) {
+          result += numberToWords(hundredNum)
+        }
+        return result.trim()
+      })
+      // Handle 4-digit numbers without commas (like 2703)
+      .replace(/\b(\d{4})\b/g, (match, num) => {
+        const number = Number.parseInt(num)
+        if (number >= 1000 && number <= 9999) {
+          const thousands = Math.floor(number / 1000)
+          const remainder = number % 1000
+          if (remainder === 0) {
+            return numberToWords(thousands) + " thousand"
+          } else if (remainder < 100) {
+            return numberToWords(thousands) + " thousand " + numberToWords(remainder)
+          } else {
+            // For numbers like 2703, say "twenty-seven oh three"
+            const hundreds = Math.floor(remainder / 100)
+            const tens = remainder % 100
+            if (tens < 10) {
+              return numberToWords(thousands * 10 + hundreds) + " oh " + numberToWords(tens)
+            } else {
+              return numberToWords(thousands * 10 + hundreds) + " " + numberToWords(tens)
+            }
+          }
+        }
+        return match
+      })
+      // Handle price formatting
+      .replace(/\$(\d+)/g, "$1 dollars")
+  )
+}
+
+function numberToWords(num: number): string {
+  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+  const teens = [
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+  ]
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+  const hundreds = [
+    "",
+    "one hundred",
+    "two hundred",
+    "three hundred",
+    "four hundred",
+    "five hundred",
+    "six hundred",
+    "seven hundred",
+    "eight hundred",
+    "nine hundred",
+  ]
+
+  if (num === 0) return "zero"
+  if (num < 10) return ones[num]
+  if (num < 20) return teens[num - 10]
+  if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : "")
+  if (num < 1000) return hundreds[Math.floor(num / 100)] + (num % 100 ? " " + numberToWords(num % 100) : "")
+
+  return num.toString() // Fallback for very large numbers
 }
 
 function determineListingTone(price: number, description: string): string {
@@ -64,7 +161,7 @@ function generateCallToAction(tone: string): string {
     case "affordable":
       return "Don't wait - call me today to see this great value."
     default:
-      return "Schedule your showing today."
+      return "DM me now to schedule a showing."
   }
 }
 
@@ -111,8 +208,8 @@ Requirements:
 - No generic hype phrases like "won't last long"
 - Focus on unique features from the description
 - End with: "${callToAction}"
-- Use natural speech for numbers (1.5 = "one and a half")
 - Sound like a professional real estate agent narrating
+- Avoid redundancy like saying "3 bedrooms" and "3BR" separately
 
 Write only the script text suitable for voiceover narration.`
 
@@ -123,7 +220,7 @@ Write only the script text suitable for voiceover narration.`
           temperature: 0.7,
         })
 
-        script = formatNumbersForSpeech(text.trim())
+        script = convertNumbersToNaturalSpeech(text.trim())
         method = "OpenAI"
       } catch (error) {
         console.warn("OpenAI failed, using template:", error)
@@ -164,7 +261,7 @@ Write only the script text suitable for voiceover narration.`
         }Offered at ${numPrice.toLocaleString()} dollars. ${callToAction}`
       }
 
-      script = formatNumbersForSpeech(script)
+      script = convertNumbersToNaturalSpeech(script)
     }
 
     return NextResponse.json({

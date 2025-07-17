@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Fal AI API key not configured" }, { status: 500 })
     }
 
-    // Use Fal AI for video conversion
+    // Use Fal AI for video conversion to MP4 H.264/AAC
     const response = await fetch("https://fal.run/fal-ai/video-to-video", {
       method: "POST",
       headers: {
@@ -22,6 +22,10 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         video_url: webmUrl,
         output_format: "mp4",
+        video_codec: "h264",
+        audio_codec: "aac",
+        resolution: "1080x1920",
+        frame_rate: 30,
         quality: "high",
         max_file_size_mb: 100,
       }),
@@ -30,25 +34,13 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorData = await response.json()
       console.error("Fal AI conversion error:", errorData)
-      return NextResponse.json(
-        {
-          error: "MP4 conversion failed",
-          details: `Fal AI error: ${response.status}`,
-        },
-        { status: 500 },
-      )
+      throw new Error(`Fal AI error: ${response.status}`)
     }
 
     const result = await response.json()
 
     if (!result.video_url) {
-      return NextResponse.json(
-        {
-          error: "MP4 conversion failed",
-          details: "No video URL returned from Fal AI",
-        },
-        { status: 500 },
-      )
+      throw new Error("No video URL returned from Fal AI")
     }
 
     return NextResponse.json({

@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
     }
 
-    // Rachel voice ID - LOCKED
+    // Rachel voice ID - LOCKED (no fallbacks allowed)
     const RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${RACHEL_VOICE_ID}`, {
@@ -26,9 +26,9 @@ export async function POST(request: NextRequest) {
         text: script,
         model_id: "eleven_multilingual_v2",
         voice_settings: {
-          stability: 0.5,
+          stability: 0.6,
           similarity_boost: 0.8,
-          style: 0.2,
+          style: 0.3,
           use_speaker_boost: true,
         },
       }),
@@ -37,13 +37,7 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text()
       console.error("ElevenLabs error:", errorText)
-      return NextResponse.json(
-        {
-          error: "Audio generation failed",
-          details: `ElevenLabs API error: ${response.status}`,
-        },
-        { status: 500 },
-      )
+      throw new Error(`ElevenLabs API error: ${response.status}`)
     }
 
     const audioBuffer = await response.arrayBuffer()

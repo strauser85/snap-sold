@@ -15,37 +15,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid file type" }, { status: 400 })
     }
 
-    // Validate file size (50MB limit)
-    const maxSize = 50 * 1024 * 1024
+    // Validate file size (100MB max)
+    const maxSize = 100 * 1024 * 1024
     if (file.size > maxSize) {
-      return NextResponse.json({ error: "File too large (max 50MB)" }, { status: 400 })
+      return NextResponse.json({ error: "File too large" }, { status: 400 })
     }
 
-    // Generate unique filename
-    const timestamp = Date.now()
-    const randomId = Math.random().toString(36).substring(2, 15)
-    const extension = file.name.split(".").pop() || "bin"
-    const filename = `${timestamp}-${randomId}.${extension}`
-
-    // Upload to Vercel Blob
-    const blob = await put(filename, file, {
+    const blob = await put(file.name, file, {
       access: "public",
-      addRandomSuffix: false,
+      handleUploadUrl: "/api/upload-image",
     })
 
-    return NextResponse.json({
-      url: blob.url,
-      filename: filename,
-      size: file.size,
-      type: file.type,
-    })
+    return NextResponse.json({ url: blob.url })
   } catch (error) {
     console.error("Upload error:", error)
     return NextResponse.json(
-      {
-        error: "Upload failed",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Upload failed", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
   }
