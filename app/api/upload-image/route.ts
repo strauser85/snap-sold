@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     // Upload to Vercel Blob
     const blob = await put(filename, file, {
       access: "public",
-      handleUploadUrl: "/api/upload-image",
+      addRandomSuffix: false,
     })
 
     return NextResponse.json({
@@ -42,7 +42,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Upload error:", error)
     return NextResponse.json(
-      { error: "Upload failed", details: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: "Upload failed",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }

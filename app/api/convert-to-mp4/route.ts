@@ -5,7 +5,7 @@ export async function POST(request: NextRequest) {
     const { webmUrl } = await request.json()
 
     if (!webmUrl) {
-      return NextResponse.json({ error: "No WebM URL provided" }, { status: 400 })
+      return NextResponse.json({ error: "WebM URL is required" }, { status: 400 })
     }
 
     if (!process.env.FAL_KEY) {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use Fal AI for video conversion
-    const response = await fetch("https://fal.run/fal-ai/video-converter", {
+    const response = await fetch("https://fal.run/fal-ai/video-to-video", {
       method: "POST",
       headers: {
         Authorization: `Key ${process.env.FAL_KEY}`,
@@ -29,16 +29,32 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorData = await response.json()
-      throw new Error(`Fal AI conversion failed: ${errorData.detail || response.statusText}`)
+      console.error("Fal AI conversion error:", errorData)
+      return NextResponse.json(
+        {
+          error: "MP4 conversion failed",
+          details: `Fal AI error: ${response.status}`,
+        },
+        { status: 500 },
+      )
     }
 
     const result = await response.json()
 
+    if (!result.video_url) {
+      return NextResponse.json(
+        {
+          error: "MP4 conversion failed",
+          details: "No video URL returned from Fal AI",
+        },
+        { status: 500 },
+      )
+    }
+
     return NextResponse.json({
       mp4Url: result.video_url,
-      originalSize: result.original_size_mb,
-      convertedSize: result.converted_size_mb,
-      duration: result.duration_seconds,
+      fileSize: result.file_size || null,
+      duration: result.duration || null,
     })
   } catch (error) {
     console.error("MP4 conversion error:", error)
