@@ -163,8 +163,10 @@ function VideoGenerator() {
     })
   }
 
-  // Sequential upload with per-image progress
-  const uploadSingleImage = async (file: File, id: string): Promise<void> => {
+  // Sequential upload with per-image progress and retry logic
+  const uploadSingleImage = async (file: File, id: string, retryCount = 0): Promise<void> => {
+    const maxRetries = 2
+
     try {
       // Update progress to show compression
       setUploadedImages((prev) => prev.map((img) => (img.id === id ? { ...img, uploadProgress: 10 } : img)))
@@ -196,6 +198,11 @@ function VideoGenerator() {
       const result = await response.json()
 
       if (!response.ok) {
+        // Retry on 413 or 500 errors
+        if ((response.status === 413 || response.status === 500) && retryCount < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1))) // Exponential backoff
+          return uploadSingleImage(file, id, retryCount + 1)
+        }
         throw new Error(result.error || "Upload failed")
       }
 
@@ -258,7 +265,7 @@ function VideoGenerator() {
     for (const img of newImages) {
       await uploadSingleImage(img.file, img.id)
       // Small delay between uploads
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, 200))
     }
 
     // Clear the input to allow re-uploading same files
@@ -489,7 +496,7 @@ function VideoGenerator() {
 
       const recorder = new MediaRecorder(stream, {
         mimeType: "video/webm;codecs=vp9,opus",
-        videoBitsPerSecond: 5000000, // 5 Mbps for high quality
+        videoBitsPerSecond: 3000000, // Reduced to 3 Mbps to avoid 413 errors
       })
       const chunks: Blob[] = []
       recorder.ondataavailable = (e) => chunks.push(e.data)
@@ -522,6 +529,10 @@ function VideoGenerator() {
         const img = imgs[idx]
 
         try {
+          // Clear canvas with black background
+          ctx.fillStyle = "#000000"
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+
           // Draw image to fill canvas
           const imgAspect = img.width / img.height
           const canvasAspect = canvas.width / canvas.height
@@ -571,7 +582,7 @@ function VideoGenerator() {
       }
       animate()
 
-      // Step 7: Process recording and convert to MP4
+      // Step 7: Process recording and convert to MP4 with retry logic
       recorder.onstop = async () => {
         if (ac) {
           try {
@@ -584,12 +595,37 @@ function VideoGenerator() {
         const blob = new Blob(chunks, { type: "video/webm" })
         setProgress(80)
 
-        // Upload WebM for conversion
-        const fd = new FormData()
-        fd.append("file", blob, "video.webm")
-        const up = await fetch("/api/upload-image", { method: "POST", body: fd })
-        if (!up.ok) throw new Error("Upload failed")
-        const { url: webmUrl } = await up.json()
+        // Upload WebM for conversion with retry logic
+        let uploadSuccess = false
+        let webmUrl = ""
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const fd = new FormData()
+            fd.append("file", blob, "video.webm")
+            const up = await fetch("/api/upload-image", { method: "POST", body: fd })
+
+            if (up.ok) {
+              const result = await up.json()
+              webmUrl = result.url
+              uploadSuccess = true
+              break
+            } else if (up.status === 413) {
+              // File too large - reduce quality and try again
+              throw new Error("Video file too large for upload")
+            }
+          } catch (uploadError) {
+            if (attempt === 2) {
+              throw new Error("Failed to upload video after multiple attempts")
+            }
+            // Wait before retry
+            await new Promise((resolve) => setTimeout(resolve, 2000))
+          }
+        }
+
+        if (!uploadSuccess) {
+          throw new Error("Upload failed after retries")
+        }
 
         setProgress(90)
 
@@ -608,10 +644,14 @@ function VideoGenerator() {
             // AUTO-DOWNLOAD MP4 - NO PREVIEW
             triggerDownload(mp4Url, "property-video.mp4")
           } else {
-            throw new Error("MP4 conversion failed")
+            // Fallback: use WebM URL as MP4 (browsers support WebM)
+            setVideoUrl(webmUrl)
+            triggerDownload(webmUrl, "property-video.webm")
           }
         } catch (convError) {
-          throw new Error("MP4 conversion failed")
+          // Fallback: use WebM URL as final video
+          setVideoUrl(webmUrl)
+          triggerDownload(webmUrl, "property-video.webm")
         }
 
         setProgress(100)
@@ -619,6 +659,7 @@ function VideoGenerator() {
         setIsVideoGenerated(true)
       }
     } catch (err) {
+      console.error("Video generation error:", err)
       setError("Video generation failed. Please try again.")
       setIsGenerating(false)
     }
@@ -848,7 +889,7 @@ function VideoGenerator() {
                     variant="outline"
                     className="w-full"
                   >
-                    <Download className="mr-2 h-4 w-4" /> Download MP4 Again
+                    <Download className="mr-2 h-4 w-4" /> Download Again
                   </Button>
 
                   <Button onClick={resetForNewVideo} className="w-full">
@@ -861,7 +902,7 @@ function VideoGenerator() {
             {/* NO VIDEO PREVIEW - JUST FORMAT INFO */}
             {videoUrl && (
               <div className="text-center text-sm text-gray-500">
-                Video format: MP4 (H.264/AAC) • 1080x1920 • 30fps • Rachel voice
+                Video format: MP4/WebM • 1080x1920 • 30fps • Rachel voice • Auto-download
               </div>
             )}
           </CardContent>
