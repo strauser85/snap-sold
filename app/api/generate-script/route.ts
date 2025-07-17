@@ -1,11 +1,98 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { generateText } from "ai"
-import { openai } from "@ai-sdk/openai"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
 
-// Number to words conversion for natural speech
+const STREET_ABBREVIATIONS: Record<string, string> = {
+  Dr: "Drive",
+  dr: "Drive",
+  ST: "Street",
+  St: "Street",
+  st: "Street",
+  Ave: "Avenue",
+  ave: "Avenue",
+  AVE: "Avenue",
+  Blvd: "Boulevard",
+  blvd: "Boulevard",
+  Rd: "Road",
+  rd: "Road",
+  Ln: "Lane",
+  ln: "Lane",
+  Ct: "Court",
+  ct: "Court",
+  Cir: "Circle",
+  cir: "Circle",
+  Pkwy: "Parkway",
+  pkwy: "Parkway",
+}
+
+function expandStreetAbbreviations(address: string): string {
+  return address
+    .split(" ")
+    .map((word) => STREET_ABBREVIATIONS[word] ?? word)
+    .join(" ")
+}
+
+// Remove ZIP codes from spoken address - keep city/state only
+function sanitizeAddressForSpeech(address: string): string {
+  // Remove ZIP codes (5 digits or 5+4 format)
+  const withoutZip = address.replace(/\b\d{5}(-\d{4})?\b/g, "").trim()
+
+  // Clean up extra commas and spaces
+  return withoutZip.replace(/,\s*,/g, ",").replace(/,\s*$/g, "").trim()
+}
+
+// Convert numbers to natural speech for TTS voiceover
+function formatNumbersForVoiceover(text: string): string {
+  return (
+    text
+      // Handle addresses (2703 → "twenty-seven oh three")
+      .replace(/\b(\d{4})\b/g, (match, num) => {
+        const digits = num.split("")
+        const first = Number.parseInt(digits[0] + digits[1])
+        const second = Number.parseInt(digits[2] + digits[3])
+        if (second < 10) {
+          return `${numberToWords(first)} oh ${numberToWords(second)}`
+        } else {
+          return `${numberToWords(first)} ${numberToWords(second)}`
+        }
+      })
+
+      // Handle prices with commas (235,000 → "two hundred thirty-five thousand dollars")
+      .replace(/\$(\d{1,3}(?:,\d{3})*)/g, (match, num) => {
+        const cleanNum = num.replace(/,/g, "")
+        const numValue = Number.parseInt(cleanNum)
+        return `${numberToWords(numValue)} dollars`
+      })
+
+      // Handle square footage (1,066 → "one thousand sixty-six")
+      .replace(/(\d{1,3}(?:,\d{3})*)\s*(square feet|sq ft|sqft)/gi, (match, num, unit) => {
+        const cleanNum = num.replace(/,/g, "")
+        const numValue = Number.parseInt(cleanNum)
+        return `${numberToWords(numValue)} square feet`
+      })
+
+      // Handle bathrooms (1.5 → "one and a half")
+      .replace(/(\d+)\.5\s*(bathroom|bath)/gi, (match, num, unit) => {
+        return `${numberToWords(Number.parseInt(num))} and a half ${unit}s`
+      })
+
+      // Handle regular decimals (1.5 → "one and a half")
+      .replace(/(\d+)\.5/g, (match, num) => {
+        return `${numberToWords(Number.parseInt(num))} and a half`
+      })
+
+      // Handle whole numbers
+      .replace(/\b(\d+)\b/g, (match, num) => {
+        const numValue = Number.parseInt(num)
+        if (numValue > 0 && numValue <= 100) {
+          return numberToWords(numValue)
+        }
+        return match
+      })
+  )
+}
+
 function numberToWords(num: number): string {
   if (num === 0) return "zero"
 
@@ -23,209 +110,184 @@ function numberToWords(num: number): string {
     "nineteen",
   ]
   const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
-  const thousands = ["", "thousand", "million", "billion"]
 
-  function convertHundreds(n: number): string {
-    let result = ""
-
-    if (n >= 100) {
-      result += ones[Math.floor(n / 100)] + " hundred"
-      n %= 100
-      if (n > 0) result += " "
-    }
-
-    if (n >= 20) {
-      result += tens[Math.floor(n / 10)]
-      n %= 10
-      if (n > 0) result += "-" + ones[n]
-    } else if (n >= 10) {
-      result += teens[n - 10]
-    } else if (n > 0) {
-      result += ones[n]
-    }
-
-    return result
+  if (num < 10) return ones[num]
+  if (num < 20) return teens[num - 10]
+  if (num < 100) {
+    return tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : "")
   }
-
   if (num < 1000) {
-    return convertHundreds(num)
+    return ones[Math.floor(num / 100)] + " hundred" + (num % 100 ? " " + numberToWords(num % 100) : "")
+  }
+  if (num < 1000000) {
+    return numberToWords(Math.floor(num / 1000)) + " thousand" + (num % 1000 ? " " + numberToWords(num % 1000) : "")
   }
 
-  let result = ""
-  let thousandIndex = 0
-
-  while (num > 0) {
-    const chunk = num % 1000
-    if (chunk > 0) {
-      const chunkWords = convertHundreds(chunk)
-      if (thousandIndex > 0) {
-        result = chunkWords + " " + thousands[thousandIndex] + (result ? " " + result : "")
-      } else {
-        result = chunkWords
-      }
-    }
-    num = Math.floor(num / 1000)
-    thousandIndex++
-  }
-
-  return result
+  return num.toString() // Fallback for very large numbers
 }
 
-// Convert address numbers to natural speech
-function convertAddressToSpeech(address: string): string {
-  return address.replace(/\b(\d+)\b/g, (match, number) => {
-    const num = Number.parseInt(number)
-    if (num < 10) return numberToWords(num)
-    if (num < 100) return numberToWords(num)
-    if (num < 1000) return numberToWords(num)
+// Normalize abbreviations and fix malformed tokens
+function normalizePropertyTerms(text: string): string {
+  return (
+    text
+      // Fix malformed tokens
+      .replace(/\bthreebr\b/gi, "three bedroom")
+      .replace(/\bone\.\s*fiveba\b/gi, "one and a half bathroom")
+      .replace(/\bone\.\s*bath\b/gi, "one bathroom")
+      .replace(/\btwo\.\s*bath\b/gi, "two bathroom")
+      .replace(/\bthree\.\s*bath\b/gi, "three bathroom")
 
-    // For 4-digit addresses like "2703", say "twenty-seven oh three"
-    if (num >= 1000 && num <= 9999) {
-      const thousands = Math.floor(num / 100)
-      const remainder = num % 100
-      if (remainder === 0) {
-        return numberToWords(thousands) + " hundred"
-      } else if (remainder < 10) {
-        return numberToWords(thousands) + " oh " + numberToWords(remainder)
-      } else {
-        return numberToWords(thousands) + " " + numberToWords(remainder)
-      }
-    }
+      // Normalize abbreviations
+      .replace(/(\d+)\s*BR\b/gi, "$1 bedroom")
+      .replace(/(\d+)\s*BA\b/gi, "$1 bathroom")
+      .replace(/(\d+)\.5\s*BA\b/gi, "$1 and a half bathroom")
+      .replace(/\bSQ\s*FT\b/gi, "square feet")
+      .replace(/\bSQFT\b/gi, "square feet")
 
-    return numberToWords(num)
-  })
+      // Fix plural forms
+      .replace(/(\d+)\s+bedroom(?!s)/gi, (match, num) => {
+        return Number.parseInt(num) === 1 ? `${num} bedroom` : `${num} bedrooms`
+      })
+      .replace(/(\d+)\s+bathroom(?!s)/gi, (match, num) => {
+        return Number.parseInt(num) === 1 ? `${num} bathroom` : `${num} bathrooms`
+      })
+
+      // Clean up spacing
+      .replace(/\s+/g, " ")
+      .trim()
+  )
 }
 
-// Convert price to natural speech
-function convertPriceToSpeech(price: number): string {
-  if (price >= 1000000) {
-    const millions = Math.floor(price / 1000000)
-    const remainder = price % 1000000
-    if (remainder === 0) {
-      return numberToWords(millions) + " million dollars"
-    } else {
-      const thousands = Math.floor(remainder / 1000)
-      if (thousands > 0) {
-        return numberToWords(millions) + " million " + numberToWords(thousands) + " thousand dollars"
-      } else {
-        return numberToWords(millions) + " million dollars"
-      }
-    }
-  } else if (price >= 1000) {
-    const thousands = Math.floor(price / 1000)
-    const remainder = price % 1000
-    if (remainder === 0) {
-      return numberToWords(thousands) + " thousand dollars"
-    } else {
-      return numberToWords(thousands) + " thousand " + numberToWords(remainder) + " dollars"
-    }
-  } else {
-    return numberToWords(price) + " dollars"
-  }
-}
+// Clean script for voiceover and remove redundancy
+function sanitizeScriptForVoiceover(script: string): string {
+  return (
+    script
+      // Capitalize sentences
+      .replace(/(^|\.\s+)([a-z])/g, (match, prefix, letter) => prefix + letter.toUpperCase())
 
-// Convert bedrooms/bathrooms to natural speech
-function convertRoomsToSpeech(rooms: number, type: "bedroom" | "bathroom"): string {
-  if (rooms === Math.floor(rooms)) {
-    // Whole number
-    const roomWord = rooms === 1 ? type : type + "s"
-    return numberToWords(rooms) + " " + roomWord
-  } else {
-    // Half bathroom (e.g., 1.5, 2.5)
-    const whole = Math.floor(rooms)
-    const roomWord = rooms <= 1.5 ? type : type + "s"
-    return numberToWords(whole) + " and a half " + roomWord
-  }
+      // Remove redundant bed/bath mentions
+      .replace(/(\d+\s+bedrooms?)[^.]*(\d+\s+bedrooms?)/gi, "$1")
+      .replace(/(\d+\s+bathrooms?)[^.]*(\d+\s+bathrooms?)/gi, "$1")
+
+      // Fix sentence structure
+      .replace(/\.\s*\./g, ".")
+      .replace(/\s+/g, " ")
+      .replace(/,\s*,/g, ",")
+
+      .trim()
+  )
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = await request.json()
+    const body = await request.json()
+    const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = body
 
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
       return NextResponse.json({ error: "Missing required property details" }, { status: 400 })
     }
 
-    // Remove ZIP code from address for speech (keep city, state)
-    const addressParts = address.split(",")
-    const streetAddress = addressParts[0]?.trim() || address
-    const cityState = addressParts.slice(1, -1).join(",").trim() // Remove last part (ZIP)
-    const speechAddress = convertAddressToSpeech(streetAddress)
-    const locationForSpeech = cityState || "this beautiful location"
+    const expandedAddress = expandStreetAbbreviations(address)
+    const speechAddress = sanitizeAddressForSpeech(expandedAddress)
+    const numPrice = Number(price)
+    const numBedrooms = Number(bedrooms)
+    const numBathrooms = Number(bathrooms)
+    const numSqft = Number(sqft)
 
-    // Convert numbers to natural speech
-    const priceInWords = convertPriceToSpeech(price)
-    const bedroomsInWords = convertRoomsToSpeech(bedrooms, "bedroom")
-    const bathroomsInWords = convertRoomsToSpeech(bathrooms, "bathroom")
-    const sqftInWords = numberToWords(sqft) + " square feet"
+    // Determine property tone based on price and description
+    let tone = "professional"
+    if (numPrice >= 800000) tone = "luxury"
+    else if (numPrice <= 300000) tone = "affordable"
+    else if (propertyDescription?.toLowerCase().includes("family") || numBedrooms >= 3) tone = "family"
 
-    // Extract key features from description
-    const features = []
-    if (propertyDescription) {
-      const lowerDesc = propertyDescription.toLowerCase()
-      if (lowerDesc.includes("detached shop")) features.push("detached shop")
-      if (lowerDesc.includes("corner lot")) features.push("corner lot")
-      if (lowerDesc.includes("pool")) features.push("pool")
-      if (lowerDesc.includes("garage")) features.push("garage")
-      if (lowerDesc.includes("fireplace")) features.push("fireplace")
-      if (lowerDesc.includes("deck")) features.push("deck")
-      if (lowerDesc.includes("patio")) features.push("patio")
-      if (lowerDesc.includes("basement")) features.push("basement")
-      if (lowerDesc.includes("walk-in closet")) features.push("walk-in closets")
+    let script = ""
+
+    // Use property description as the base, inject structured data cleanly
+    if (propertyDescription && propertyDescription.trim().length > 10) {
+      // Start with normalized description
+      const baseDescription = normalizePropertyTerms(propertyDescription.trim())
+
+      // Check if description already mentions key details
+      const hasBedrooms = /\d+\s+(bedroom|bed)/i.test(baseDescription)
+      const hasBathrooms = /\d+\s+(bathroom|bath)/i.test(baseDescription)
+      const hasSquareFootage = /(square feet|sq ft|sqft)/i.test(baseDescription)
+      const hasPrice = /\$|dollar|price/i.test(baseDescription)
+
+      // Build script starting with description
+      script = baseDescription
+
+      // Add location if not mentioned
+      if (!script.toLowerCase().includes(speechAddress.toLowerCase().split(",")[0])) {
+        script = `Located at ${speechAddress}, this property features ${script.toLowerCase()}`
+      }
+
+      // Add missing key details without redundancy
+      const bedroomText = numBedrooms === 1 ? "bedroom" : "bedrooms"
+      const bathroomText = numBathrooms === 1 ? "bathroom" : "bathrooms"
+
+      if (!hasBedrooms && !hasBathrooms) {
+        script += ` This ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home`
+      } else if (!hasBedrooms) {
+        script += ` with ${numBedrooms} ${bedroomText}`
+      } else if (!hasBathrooms) {
+        script += ` and ${numBathrooms} ${bathroomText}`
+      }
+
+      if (!hasSquareFootage) {
+        script += ` offers ${numSqft.toLocaleString()} square feet of living space`
+      }
+
+      if (!hasPrice) {
+        if (tone === "luxury") {
+          script += ` and is priced at $${numPrice.toLocaleString()}`
+        } else {
+          script += ` for $${numPrice.toLocaleString()}`
+        }
+      }
+
+      script += "."
+    } else {
+      // Fallback script if no description provided
+      const bedroomText = numBedrooms === 1 ? "bedroom" : "bedrooms"
+      const bathroomText = numBathrooms === 1 ? "bathroom" : "bathrooms"
+
+      if (tone === "luxury") {
+        script = `Discover this exceptional ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} residence featuring ${numSqft.toLocaleString()} square feet of refined living space. Located at ${speechAddress}, this property is offered at $${numPrice.toLocaleString()}.`
+      } else if (tone === "family") {
+        script = `Welcome to this wonderful ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} family home with ${numSqft.toLocaleString()} square feet of comfortable living space. Perfectly located at ${speechAddress} and priced at $${numPrice.toLocaleString()}.`
+      } else if (tone === "affordable") {
+        script = `Great opportunity! This ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home offers ${numSqft.toLocaleString()} square feet of living space at an excellent value. Located at ${speechAddress} for just $${numPrice.toLocaleString()}.`
+      } else {
+        script = `This well-appointed ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home features ${numSqft.toLocaleString()} square feet of thoughtfully designed living space. Located at ${speechAddress} and priced at $${numPrice.toLocaleString()}.`
+      }
     }
 
-    const prompt = `Create a natural, engaging 35-second real estate video script for TikTok/Instagram Reels. Use this information:
+    // Add single, clear call-to-action
+    script += " Schedule a showing today — message me to see it in person."
 
-Address: ${speechAddress}, ${locationForSpeech}
-Price: ${priceInWords}
-Bedrooms: ${bedroomsInWords}
-Bathrooms: ${bathroomsInWords}
-Square Footage: ${sqftInWords}
-Key Features: ${features.length > 0 ? features.join(", ") : "Beautiful home"}
-Images Available: ${imageCount}
+    // Clean and format script for voiceover
+    const sanitizedScript = sanitizeScriptForVoiceover(script)
+    const voiceoverScript = formatNumbersForVoiceover(sanitizedScript)
 
-REQUIREMENTS:
-- Write for voiceover (natural speech, not reading)
-- Use the EXACT address and price pronunciations provided above
-- Target 35 seconds when spoken aloud
-- Start with attention-grabbing hook
-- Highlight key features naturally
-- End with: "Schedule a showing today — message me to see it in person."
-- Capitalize sentences properly
-- No ZIP codes in speech
-- No repetitive bed/bath mentions
-- Clean, professional tone
-
-Write ONLY the script text, no stage directions or formatting.`
-
-    const { text: script } = await generateText({
-      model: openai("gpt-4o"),
-      prompt,
-      system:
-        "You are a professional real estate script writer. Create engaging, natural-sounding voiceover scripts that sound conversational when spoken aloud. Focus on benefits and lifestyle, not just features.",
+    return NextResponse.json({
+      script: voiceoverScript,
+      originalScript: script,
+      tone: tone,
+      wordCount: voiceoverScript.split(" ").length,
+      estimatedDuration: Math.round((voiceoverScript.split(" ").length / 150) * 60), // ~150 words per minute
     })
-
-    // Clean up any remaining formatting issues
-    const cleanScript = script
-      .replace(/\b\d+br\b/gi, (match) => {
-        const num = Number.parseInt(match)
-        return convertRoomsToSpeech(num, "bedroom")
-      })
-      .replace(/\b\d+ba\b/gi, (match) => {
-        const num = Number.parseFloat(match)
-        return convertRoomsToSpeech(num, "bathroom")
-      })
-      .replace(/\bone\.\s*five\s*ba/gi, "one and a half bathroom")
-      .replace(/\bone\.\s*bath/gi, "one bathroom")
-      .replace(/\bthreebr\b/gi, "three bedroom")
-      .replace(/\$(\d+)/g, (match, number) => {
-        return convertPriceToSpeech(Number.parseInt(number))
-      })
-      .trim()
-
-    return NextResponse.json({ script: cleanScript })
   } catch (error) {
     console.error("Script generation error:", error)
-    return NextResponse.json({ error: "Failed to generate script. Please try again." }, { status: 500 })
+
+    // Fallback script generation
+    const fallbackScript =
+      "Beautiful property available for showing. Schedule a showing today — message me to see it in person."
+
+    return NextResponse.json({
+      script: fallbackScript,
+      originalScript: fallbackScript,
+      tone: "professional",
+      fallback: true,
+    })
   }
 }

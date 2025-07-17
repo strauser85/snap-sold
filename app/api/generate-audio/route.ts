@@ -11,45 +11,48 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No script provided" }, { status: 400 })
     }
 
-    // LOCKED Rachel voice - no fallbacks allowed
-    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+    if (!process.env.ELEVENLABS_API_KEY) {
+      return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
+    }
+
+    // Rachel voice ID (locked)
+    const RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${RACHEL_VOICE_ID}`, {
       method: "POST",
       headers: {
         Accept: "audio/mpeg",
         "Content-Type": "application/json",
-        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "xi-api-key": process.env.ELEVENLABS_API_KEY,
       },
       body: JSON.stringify({
         text: script,
-        model_id: "eleven_multilingual_v2",
+        model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.8,
-          style: 0.2,
+          similarity_boost: 0.75,
+          style: 0.0,
           use_speaker_boost: true,
         },
       }),
     })
 
     if (!response.ok) {
-      throw new Error(`Rachel voice generation failed: ${response.status}`)
+      const errorText = await response.text()
+      console.error("ElevenLabs API error:", response.status, errorText)
+      return NextResponse.json({ error: "Failed to generate audio" }, { status: 500 })
     }
 
     const audioBuffer = await response.arrayBuffer()
 
-    // Estimate duration based on script length (average 150 words per minute)
-    const wordCount = script.split(" ").length
-    const estimatedDuration = Math.max(20, Math.min(45, (wordCount / 150) * 60))
-
     return new NextResponse(audioBuffer, {
-      status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "X-Audio-Duration": estimatedDuration.toString(),
+        "Content-Length": audioBuffer.byteLength.toString(),
       },
     })
   } catch (error) {
     console.error("Audio generation error:", error)
-    return NextResponse.json({ error: "Rachel voice generation failed. Please try again." }, { status: 500 })
+    return NextResponse.json({ error: "Failed to generate audio" }, { status: 500 })
   }
 }
