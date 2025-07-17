@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { put } from "@vercel/blob"
 
+// Increase body size limit for large image uploads
+export const runtime = "nodejs"
+export const maxDuration = 60
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -10,11 +14,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
 
-    // Validate file type - support standard real estate image formats
+    // Validate file type - support standard real estate image formats only
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
-    if (!allowedTypes.includes(file.type)) {
+    const allowedExtensions = [".jpg", ".jpeg", ".png", ".webp"]
+
+    const fileExtension = file.name.toLowerCase().split(".").pop()
+    const isValidType = allowedTypes.includes(file.type)
+    const isValidExtension = allowedExtensions.includes(`.${fileExtension}`)
+
+    if (!isValidType || !isValidExtension) {
       return NextResponse.json(
-        { error: `Unsupported file type: ${file.type}. Please use JPG, PNG, or WebP.` },
+        {
+          error: `Unsupported file format. Please use JPG, PNG, or WebP images only.`,
+          fileName: file.name,
+          fileType: file.type,
+        },
         { status: 400 },
       )
     }
@@ -22,8 +36,13 @@ export async function POST(request: NextRequest) {
     // Validate file size (10MB max per image)
     const maxSize = 10 * 1024 * 1024 // 10MB
     if (file.size > maxSize) {
+      const fileSizeMB = Math.round((file.size / 1024 / 1024) * 10) / 10
       return NextResponse.json(
-        { error: `File too large: ${Math.round(file.size / 1024 / 1024)}MB. Maximum size is 10MB.` },
+        {
+          error: `File too large (${fileSizeMB}MB). Maximum size is 10MB per image.`,
+          fileName: file.name,
+          fileSize: fileSizeMB,
+        },
         { status: 400 },
       )
     }
@@ -31,13 +50,13 @@ export async function POST(request: NextRequest) {
     // Generate unique filename with timestamp and random suffix
     const timestamp = Date.now()
     const randomSuffix = Math.random().toString(36).substring(2, 8)
-    const fileExtension = file.name.split(".").pop()?.toLowerCase() || "jpg"
-    const filename = `property-${timestamp}-${randomSuffix}.${fileExtension}`
+    const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_")
+    const filename = `property-${timestamp}-${randomSuffix}-${cleanFileName}`
 
     // Upload to Vercel Blob with public access
     const blob = await put(filename, file, {
       access: "public",
-      addRandomSuffix: false, // We're adding our own suffix
+      addRandomSuffix: false,
     })
 
     return NextResponse.json({
@@ -53,14 +72,37 @@ export async function POST(request: NextRequest) {
 
     // Return specific error messages for different failure types
     if (error instanceof Error) {
-      if (error.message.includes("blob")) {
-        return NextResponse.json({ error: "Storage service unavailable. Please try again." }, { status: 503 })
+      if (error.message.includes("blob") || error.message.includes("storage")) {
+        return NextResponse.json(
+          {
+            error: "Storage service temporarily unavailable. Please try again in a moment.",
+          },
+          { status: 503 },
+        )
       }
-      if (error.message.includes("network")) {
-        return NextResponse.json({ error: "Network error. Please check your connection." }, { status: 502 })
+      if (error.message.includes("network") || error.message.includes("timeout")) {
+        return NextResponse.json(
+          {
+            error: "Network timeout. Please check your connection and try again.",
+          },
+          { status: 502 },
+        )
+      }
+      if (error.message.includes("size") || error.message.includes("limit")) {
+        return NextResponse.json(
+          {
+            error: "File size exceeds server limits. Please use smaller images.",
+          },
+          { status: 413 },
+        )
       }
     }
 
-    return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Upload failed. Please try again or contact support if the problem persists.",
+      },
+      { status: 500 },
+    )
   }
 }

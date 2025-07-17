@@ -30,39 +30,72 @@ function expandStreetAbbreviations(address: string): string {
     .join(" ")
 }
 
-// Convert numbers to natural speech for voiceover
-function convertNumbersToSpeech(text: string): string {
+// Convert numbers to natural speech for TTS voiceover
+function formatNumbersForVoiceover(text: string): string {
   return (
     text
-      // Handle decimal numbers like 1.5, 2.5, etc.
-      .replace(/(\d+)\.5/g, (match, num) => `${num} and a half`)
-      .replace(/(\d+)\.25/g, (match, num) => `${num} and a quarter`)
-      .replace(/(\d+)\.75/g, (match, num) => `${num} and three quarters`)
-
-      // Handle 4-digit numbers like addresses (2703 → "twenty-seven oh three")
-      .replace(/\b(\d{4})\b/g, (match, num) => {
-        const thousands = Math.floor(Number.parseInt(num) / 1000)
-        const remainder = Number.parseInt(num) % 1000
-        if (remainder < 100) {
-          return `${numberToWords(thousands)} oh ${numberToWords(remainder)}`
-        } else {
-          return `${numberToWords(thousands)} ${numberToWords(remainder)}`
+      // Handle addresses and zip codes (2703 → "twenty-seven oh three", 38261 → "three eight two six one")
+      .replace(/\b(\d{4,5})\b/g, (match, num) => {
+        const digits = num.split("")
+        if (digits.length === 4) {
+          // 4-digit numbers like 2703
+          const first = Number.parseInt(digits[0] + digits[1])
+          const second = Number.parseInt(digits[2] + digits[3])
+          if (second < 10) {
+            return `${numberToWords(first)} oh ${numberToWords(second)}`
+          } else {
+            return `${numberToWords(first)} ${numberToWords(second)}`
+          }
+        } else if (digits.length === 5) {
+          // 5-digit zip codes like 38261
+          return digits.map((d) => numberToWords(Number.parseInt(d))).join(" ")
         }
+        return match
       })
 
-      // Handle large numbers with commas (235,000 → "two hundred thirty-five thousand")
+      // Handle prices with commas (235,000 → "two hundred thirty-five thousand dollars")
       .replace(/\$?(\d{1,3}(?:,\d{3})*)/g, (match, num) => {
         const cleanNum = num.replace(/,/g, "")
         const numValue = Number.parseInt(cleanNum)
+        const words = numberToWords(numValue)
+
         if (match.startsWith("$")) {
-          return `$${numberToWords(numValue)} dollars`
+          return `${words} dollars`
         }
-        return numberToWords(numValue)
+        return words
+      })
+
+      // Handle square footage (1,066 → "one thousand sixty-six")
+      .replace(/(\d{1,3}(?:,\d{3})*)\s*(square feet|sq ft|sqft)/gi, (match, num, unit) => {
+        const cleanNum = num.replace(/,/g, "")
+        const numValue = Number.parseInt(cleanNum)
+        return `${numberToWords(numValue)} square feet`
+      })
+
+      // Handle bathrooms (1.5 → "one and a half")
+      .replace(/(\d+)\.5\s*(bathroom|bath)/gi, (match, num, unit) => {
+        return `${numberToWords(Number.parseInt(num))} and a half ${unit}s`
+      })
+
+      // Handle regular decimals (1.5 → "one and a half")
+      .replace(/(\d+)\.5/g, (match, num) => {
+        return `${numberToWords(Number.parseInt(num))} and a half`
+      })
+
+      // Handle regular numbers without decimals
+      .replace(/\b(\d+)\b/g, (match, num) => {
+        const numValue = Number.parseInt(num)
+        if (numValue > 0 && numValue < 1000000) {
+          return numberToWords(numValue)
+        }
+        return match
       })
   )
 }
 
 function numberToWords(num: number): string {
+  if (num === 0) return "zero"
+
   const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
   const teens = [
     "ten",
@@ -78,15 +111,47 @@ function numberToWords(num: number): string {
   ]
   const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 
-  if (num === 0) return "zero"
   if (num < 10) return ones[num]
   if (num < 20) return teens[num - 10]
-  if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : "")
-  if (num < 1000) return ones[Math.floor(num / 100)] + " hundred" + (num % 100 ? " " + numberToWords(num % 100) : "")
-  if (num < 1000000)
+  if (num < 100) {
+    return tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : "")
+  }
+  if (num < 1000) {
+    return ones[Math.floor(num / 100)] + " hundred" + (num % 100 ? " " + numberToWords(num % 100) : "")
+  }
+  if (num < 1000000) {
     return numberToWords(Math.floor(num / 1000)) + " thousand" + (num % 1000 ? " " + numberToWords(num % 1000) : "")
+  }
 
   return num.toString() // Fallback for very large numbers
+}
+
+function cleanScriptForVoiceover(script: string): string {
+  return (
+    script
+      // Remove redundant phrases
+      .replace(/\b(\d+)\s+(bedroom|bath)\w*\s+home\b/gi, (match, num, type) => {
+        return `${type}${type.endsWith("h") ? "" : "room"} home`
+      })
+
+      // Fix awkward phrasing like "three bedrooms home"
+      .replace(/(\w+)\s+bedrooms?\s+home/gi, "$1-bedroom home")
+      .replace(/(\w+)\s+bathrooms?\s+home/gi, "$1-bathroom home")
+
+      // Remove sentence fragments and standalone numbers
+      .replace(/\.\s*\d+\s*\./g, ".")
+      .replace(/\s+\d+\s+/g, " ")
+
+      // Clean up multiple spaces and periods
+      .replace(/\s+/g, " ")
+      .replace(/\.+/g, ".")
+      .replace(/\s*\.\s*/g, ". ")
+
+      // Ensure proper sentence structure
+      .replace(/([.!?])\s*([a-z])/g, "$1 $2")
+
+      .trim()
+  )
 }
 
 export async function POST(request: NextRequest) {
@@ -95,7 +160,7 @@ export async function POST(request: NextRequest) {
     const { address, price, bedrooms, bathrooms, sqft, propertyDescription, imageCount } = body
 
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+      return NextResponse.json({ error: "Missing required property details" }, { status: 400 })
     }
 
     const expandedAddress = expandStreetAbbreviations(address)
@@ -104,80 +169,92 @@ export async function POST(request: NextRequest) {
     const numBathrooms = Number(bathrooms)
     const numSqft = Number(sqft)
 
-    // Determine property tone based on price
+    // Determine property tone based on price and description
     let tone = "professional"
     if (numPrice >= 800000) tone = "luxury"
     else if (numPrice <= 300000) tone = "affordable"
     else if (propertyDescription?.toLowerCase().includes("family") || numBedrooms >= 3) tone = "family"
 
-    // Create professional script based on property description as core
     let script = ""
 
-    if (propertyDescription) {
-      // Use property description as the foundation
-      script = `${propertyDescription.trim()}`
+    // Use property description as the base, inject structured data cleanly
+    if (propertyDescription && propertyDescription.trim().length > 10) {
+      // Start with the user's description as the foundation
+      script = propertyDescription.trim()
 
-      // Add key details naturally without redundancy
+      // Add location if not mentioned
+      if (!script.toLowerCase().includes(address.toLowerCase().split(",")[0])) {
+        script = `Located at ${expandedAddress}, this property features ${script.toLowerCase()}`
+      }
+
+      // Add key details only if not already mentioned
       const bedroomText = numBedrooms === 1 ? "bedroom" : "bedrooms"
       const bathroomText = numBathrooms === 1 ? "bathroom" : "bathrooms"
 
-      if (!script.toLowerCase().includes("bedroom")) {
+      if (!script.toLowerCase().includes("bedroom") && !script.toLowerCase().includes("bed")) {
         script += ` This ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home`
       }
 
-      if (!script.toLowerCase().includes("square") && sqft) {
-        script += ` offers ${numSqft} square feet of living space`
+      if (!script.toLowerCase().includes("square") && !script.toLowerCase().includes("sq")) {
+        script += ` offers ${numSqft.toLocaleString()} square feet of living space`
       }
 
-      if (!script.toLowerCase().includes("price") && !script.includes("$")) {
+      if (
+        !script.toLowerCase().includes("price") &&
+        !script.includes("$") &&
+        !script.toLowerCase().includes("dollar")
+      ) {
         if (tone === "luxury") {
-          script += ` and is priced at ${numPrice.toLocaleString()} dollars`
+          script += ` and is priced at $${numPrice.toLocaleString()}`
         } else {
-          script += ` for just ${numPrice.toLocaleString()} dollars`
+          script += ` for $${numPrice.toLocaleString()}`
         }
       }
 
-      script += ` located at ${expandedAddress}.`
+      script += "."
     } else {
-      // Fallback if no description provided
+      // Fallback script if no description provided
       const bedroomText = numBedrooms === 1 ? "bedroom" : "bedrooms"
       const bathroomText = numBathrooms === 1 ? "bathroom" : "bathrooms"
 
       if (tone === "luxury") {
-        script = `Discover this exceptional ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} residence featuring ${numSqft} square feet of refined living space. Located at ${expandedAddress}, this property is offered at ${numPrice.toLocaleString()} dollars.`
+        script = `Discover this exceptional ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} residence featuring ${numSqft.toLocaleString()} square feet of refined living space. Located at ${expandedAddress}, this property is offered at $${numPrice.toLocaleString()}.`
       } else if (tone === "family") {
-        script = `Welcome to this wonderful ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} family home with ${numSqft} square feet of comfortable living space. Perfectly located at ${expandedAddress} and priced at ${numPrice.toLocaleString()} dollars.`
+        script = `Welcome to this wonderful ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} family home with ${numSqft.toLocaleString()} square feet of comfortable living space. Perfectly located at ${expandedAddress} and priced at $${numPrice.toLocaleString()}.`
       } else if (tone === "affordable") {
-        script = `Great opportunity! This ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home offers ${numSqft} square feet of living space at an excellent value. Located at ${expandedAddress} for just ${numPrice.toLocaleString()} dollars.`
+        script = `Great opportunity! This ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home offers ${numSqft.toLocaleString()} square feet of living space at an excellent value. Located at ${expandedAddress} for just $${numPrice.toLocaleString()}.`
       } else {
-        script = `This well-appointed ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home features ${numSqft} square feet of thoughtfully designed living space. Located at ${expandedAddress} and priced at ${numPrice.toLocaleString()} dollars.`
+        script = `This well-appointed ${numBedrooms} ${bedroomText}, ${numBathrooms} ${bathroomText} home features ${numSqft.toLocaleString()} square feet of thoughtfully designed living space. Located at ${expandedAddress} and priced at $${numPrice.toLocaleString()}.`
       }
     }
 
-    // Add appropriate call-to-action based on tone
+    // Add single, clear call-to-action based on tone
     if (tone === "luxury") {
-      script += " Schedule a private showing today."
+      script += " Contact me today to schedule your private showing."
     } else if (tone === "family") {
-      script += " Perfect for growing families. Schedule a showing today."
+      script += " Call now to schedule a showing for your family."
     } else if (tone === "affordable") {
-      script += " Don't miss this opportunity. Call now to schedule a showing."
+      script += " Don't wait - call now to schedule a showing."
     } else {
-      script += " Contact me today to schedule a showing."
+      script += " Call now to schedule a showing."
     }
 
-    // Convert numbers to natural speech for voiceover
-    const voiceoverScript = convertNumbersToSpeech(script)
+    // Clean script for voiceover and format numbers
+    const cleanedScript = cleanScriptForVoiceover(script)
+    const voiceoverScript = formatNumbersForVoiceover(cleanedScript)
 
     return NextResponse.json({
       script: voiceoverScript,
       originalScript: script,
       tone: tone,
+      wordCount: voiceoverScript.split(" ").length,
+      estimatedDuration: Math.round((voiceoverScript.split(" ").length / 150) * 60), // ~150 words per minute
     })
   } catch (error) {
     console.error("Script generation error:", error)
 
     // Fallback script generation
-    const fallbackScript = "Beautiful property available for showing. Contact me today for more information."
+    const fallbackScript = "Beautiful property available for showing. Call now to schedule a viewing."
 
     return NextResponse.json({
       script: fallbackScript,

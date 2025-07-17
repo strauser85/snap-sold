@@ -58,7 +58,8 @@ function expandStreetAbbreviations(address: string) {
 }
 
 const MAX_IMAGES = 30
-const MAX_WEBM_SIZE_MB = 200
+const MAX_FILE_SIZE_MB = 10
+const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
 
 function VideoGenerator() {
   // LOCKED FORM STATE - NO LAYOUT CHANGES ALLOWED
@@ -148,7 +149,17 @@ function VideoGenerator() {
 
   const uploadSingleImage = async (file: File, id: string): Promise<void> => {
     try {
-      // Compress image before upload
+      // Validate file before upload
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        throw new Error(`Unsupported format. Use JPG, PNG, or WebP only.`)
+      }
+
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        const sizeMB = Math.round((file.size / 1024 / 1024) * 10) / 10
+        throw new Error(`File too large (${sizeMB}MB). Maximum is ${MAX_FILE_SIZE_MB}MB.`)
+      }
+
+      // Compress image before upload to reduce size
       const compressedFile = await compressImage(file)
 
       const formData = new FormData()
@@ -199,20 +210,23 @@ function VideoGenerator() {
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     const freeSlots = MAX_IMAGES - uploadedImages.length
-    const filesToUpload = files.slice(0, freeSlots)
+    const filesToProcess = files.slice(0, freeSlots)
 
-    // Validate file types and sizes before starting uploads
+    if (files.length > freeSlots) {
+      setError(`Only ${freeSlots} more images can be uploaded (${MAX_IMAGES} max total)`)
+      setTimeout(() => setError(null), 5000)
+    }
+
+    // Pre-validate files and show immediate feedback
     const validFiles: File[] = []
     const invalidFiles: string[] = []
 
-    filesToUpload.forEach((file) => {
-      const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
-      const maxSize = 10 * 1024 * 1024 // 10MB
-
-      if (!allowedTypes.includes(file.type)) {
+    filesToProcess.forEach((file) => {
+      if (!ALLOWED_TYPES.includes(file.type)) {
         invalidFiles.push(`${file.name}: Unsupported format`)
-      } else if (file.size > maxSize) {
-        invalidFiles.push(`${file.name}: Too large (${Math.round(file.size / 1024 / 1024)}MB)`)
+      } else if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        const sizeMB = Math.round((file.size / 1024 / 1024) * 10) / 10
+        invalidFiles.push(`${file.name}: Too large (${sizeMB}MB)`)
       } else {
         validFiles.push(file)
       }
@@ -220,13 +234,15 @@ function VideoGenerator() {
 
     // Show validation errors if any
     if (invalidFiles.length > 0) {
-      setError(`Some files were skipped: ${invalidFiles.join(", ")}`)
-      setTimeout(() => setError(null), 5000) // Clear error after 5 seconds
+      setError(
+        `Skipped files: ${invalidFiles.slice(0, 3).join(", ")}${invalidFiles.length > 3 ? ` and ${invalidFiles.length - 3} more` : ""}`,
+      )
+      setTimeout(() => setError(null), 8000)
     }
 
-    // Add valid files to state and start uploads
+    // Add valid files to state and start parallel uploads
     validFiles.forEach(async (file, idx) => {
-      const id = `img-${Date.now()}-${idx}`
+      const id = `img-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 8)}`
       const newImg: UploadedImage = {
         file,
         previewUrl: URL.createObjectURL(file),
@@ -237,11 +253,11 @@ function VideoGenerator() {
 
       setUploadedImages((prev) => [...prev, newImg])
 
-      // Start upload (don't await - let them run in parallel)
+      // Start upload (parallel processing - don't await)
       uploadSingleImage(file, id)
     })
 
-    // Clear the input
+    // Clear the input to allow re-uploading same files
     e.target.value = ""
   }
 
@@ -278,7 +294,7 @@ function VideoGenerator() {
           bathrooms: Number(bathrooms),
           sqft: Number(sqft),
           propertyDescription,
-          imageCount: uploadedImages.length,
+          imageCount: uploadedImages.filter((img) => img.uploadSuccess).length,
         }),
       })
 
@@ -287,7 +303,6 @@ function VideoGenerator() {
       const { script } = await resp.json()
       setGeneratedScript(script)
     } catch (err) {
-      // SILENT ERROR HANDLING
       setError("Script generation failed. Please try again.")
     } finally {
       setIsGeneratingScript(false)
@@ -563,13 +578,6 @@ function VideoGenerator() {
         }
 
         const blob = new Blob(chunks, { type: "video/webm" })
-
-        if (blob.size > MAX_WEBM_SIZE_MB * 1024 * 1024) {
-          setError("Recording exceeded size limit.")
-          setIsGenerating(false)
-          return
-        }
-
         setProgress(80)
 
         // Upload WebM for conversion
@@ -607,7 +615,6 @@ function VideoGenerator() {
         setIsVideoGenerated(true)
       }
     } catch (err) {
-      // SILENT ERROR HANDLING - MINIMAL USER MESSAGE
       setError("Video generation failed. Please try again.")
       setIsGenerating(false)
     }
@@ -701,6 +708,7 @@ function VideoGenerator() {
                 value={propertyDescription}
                 onChange={(e) => setPropertyDescription(e.target.value)}
                 disabled={isGenerating}
+                placeholder="Describe unique features like detached shop, corner lot, pool, etc..."
               />
             </div>
 
@@ -715,7 +723,7 @@ function VideoGenerator() {
               />
               <p className="text-sm text-gray-500">
                 {uploaded} uploaded, {uploading} uploading, {failed} failed
-                {uploadedImages.length > 0 && ` • Supports JPG, PNG, WebP up to 10MB each`}
+                {uploadedImages.length > 0 && ` • JPG, PNG, WebP up to ${MAX_FILE_SIZE_MB}MB each`}
               </p>
               {uploadedImages.length > 0 && (
                 <div className="grid grid-cols-4 gap-2">
@@ -727,7 +735,6 @@ function VideoGenerator() {
                         className="h-20 w-full object-cover rounded border cursor-pointer"
                         onClick={() => !isGenerating && removeImage(img.id)}
                         onError={(e) => {
-                          // SILENT IMAGE PREVIEW ERROR HANDLING
                           const target = e.target as HTMLImageElement
                           target.src = "/placeholder.svg?height=80&width=80&text=Preview+Error"
                         }}
@@ -739,7 +746,10 @@ function VideoGenerator() {
                         <CheckCircle className="absolute top-1 right-1 h-4 w-4 text-green-600 bg-white rounded-full" />
                       )}
                       {img.uploadError && (
-                        <AlertCircle className="absolute top-1 right-1 h-4 w-4 text-red-600 bg-white rounded-full" />
+                        <AlertCircle
+                          className="absolute top-1 right-1 h-4 w-4 text-red-600 bg-white rounded-full"
+                          title={img.uploadError}
+                        />
                       )}
                     </div>
                   ))}
@@ -774,7 +784,7 @@ function VideoGenerator() {
                 id="generated-script"
                 value={generatedScript}
                 onChange={(e) => setGeneratedScript(e.target.value)}
-                placeholder="Click 'Generate Script' to create an AI-powered TikTok script..."
+                placeholder="Click 'Generate Script' to create an AI-powered TikTok script with natural number pronunciation..."
                 className="min-h-[120px]"
                 disabled={isGenerating}
               />

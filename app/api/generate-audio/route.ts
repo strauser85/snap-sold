@@ -8,21 +8,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No script provided" }, { status: 400 })
     }
 
+    if (!process.env.ELEVENLABS_API_KEY) {
+      return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
+    }
+
     // LOCKED Rachel voice - no fallbacks allowed
-    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+    const RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM" // Rachel voice ID
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${RACHEL_VOICE_ID}`, {
       method: "POST",
       headers: {
         Accept: "audio/mpeg",
         "Content-Type": "application/json",
-        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "xi-api-key": process.env.ELEVENLABS_API_KEY,
       },
       body: JSON.stringify({
         text: script,
-        model_id: "eleven_multilingual_v2",
+        model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.8,
-          style: 0.2, // Professional real estate narration style
+          similarity_boost: 0.75,
+          style: 0.0,
           use_speaker_boost: true,
         },
       }),
@@ -30,25 +36,24 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("ElevenLabs API error:", response.status, errorText)
-      throw new Error(`Rachel voice generation failed: ${response.status}`)
+      console.error("ElevenLabs API error:", errorText)
+      throw new Error(`ElevenLabs API failed: ${response.status}`)
     }
 
     const audioBuffer = await response.arrayBuffer()
 
-    // Estimate duration (rough calculation: ~150 words per minute)
+    // Estimate duration based on script length (average speaking rate: 150 words per minute)
     const wordCount = script.split(" ").length
-    const estimatedDuration = Math.max(15, Math.min(45, (wordCount / 150) * 60))
+    const estimatedDuration = Math.max(10, Math.round((wordCount / 150) * 60)) // Minimum 10 seconds
 
-    const audioResponse = new NextResponse(audioBuffer, {
+    return new NextResponse(audioBuffer, {
+      status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
         "X-Audio-Duration": estimatedDuration.toString(),
         "Cache-Control": "no-cache",
       },
     })
-
-    return audioResponse
   } catch (error) {
     console.error("Audio generation error:", error)
     return NextResponse.json({ error: "Rachel voice generation failed. Please try again." }, { status: 500 })
