@@ -9,7 +9,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 import {
   Loader2,
-  Download,
   AlertCircle,
   CheckCircle,
   XCircle,
@@ -35,7 +34,7 @@ interface Caption {
   text: string
   startTime: number
   endTime: number
-  type: "feature" | "price" | "location" | "amenity"
+  type: "bedrooms" | "bathrooms" | "sqft" | "price" | "location" | "feature"
 }
 
 export default function VideoGenerator() {
@@ -60,7 +59,6 @@ export default function VideoGenerator() {
 
   const MAX_IMAGES = 30
 
-  // Helper function to convert numbers to words
   const numberToWords = (num: number): string => {
     const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
     const teens = [
@@ -93,7 +91,6 @@ export default function VideoGenerator() {
     return num.toString()
   }
 
-  // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
@@ -123,7 +120,6 @@ export default function VideoGenerator() {
     })
   }
 
-  // Upload to blob
   const uploadImageToBlob = async (file: File): Promise<string> => {
     const formData = new FormData()
     formData.append("file", file)
@@ -228,7 +224,6 @@ export default function VideoGenerator() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate script.")
 
-      // Fallback script with proper word formatting
       const safePrice = Number(price) || 0
       const safeBedrooms = Number(bedrooms) || 0
       const safeBathrooms = Number(bathrooms) || 0
@@ -239,19 +234,13 @@ export default function VideoGenerator() {
       const bathroomsText =
         safeBathrooms === 1 ? `${numberToWords(safeBathrooms)} bathroom` : `${numberToWords(safeBathrooms)} bathrooms`
 
-      let basicScript = `Stop scrolling! This property is about to blow your mind!
-
-Welcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
+      let basicScript = `Stop scrolling! This property is about to blow your mind!\n\nWelcome to ${address}! This stunning home features ${bedroomsText} and ${bathroomsText}, with ${safeSqft.toLocaleString()} square feet of pure luxury!`
 
       if (propertyDescription.trim()) {
-        basicScript += `
-
-But wait, there's more! ${propertyDescription.trim()}`
+        basicScript += `\n\nBut wait, there's more! ${propertyDescription.trim()}`
       }
 
-      basicScript += `
-
-Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now!`
+      basicScript += `\n\nPriced at ${safePrice.toLocaleString()} dollars, this property is an incredible opportunity! Don't let this slip away! Message me now!`
 
       setGeneratedScript(basicScript)
       setScriptMethod("fallback")
@@ -270,89 +259,94 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
     })
   }, [])
 
-  // FIXED CAPTION GENERATION - NO MORE UNDEFINED ERRORS
-  const generateKeyFeatureCaptions = (duration: number): Caption[] => {
+  // FIXED: Generate ONLY key property detail captions
+  const generatePropertyCaptions = (duration: number): Caption[] => {
     const captions: Caption[] = []
 
     try {
-      // Completely safe value extraction with defaults
-      const safeAddress = (address && typeof address === "string" && address.trim()) || "Property"
-      const safePrice = price && !isNaN(Number(price)) && Number(price) > 0 ? Number(price) : 0
-      const safeBedrooms = bedrooms && !isNaN(Number(bedrooms)) && Number(bedrooms) > 0 ? Number(bedrooms) : 0
-      const safeBathrooms = bathrooms && !isNaN(Number(bathrooms)) && Number(bathrooms) > 0 ? Number(bathrooms) : 0
-      const safeSqft = sqft && !isNaN(Number(sqft)) && Number(sqft) > 0 ? Number(sqft) : 0
+      // Safely extract and validate all values
+      const safeAddress = typeof address === "string" && address.trim() ? address.trim() : ""
+      const safePrice = typeof price === "string" || typeof price === "number" ? Number(price) : 0
+      const safeBedrooms = typeof bedrooms === "string" || typeof bedrooms === "number" ? Number(bedrooms) : 0
+      const safeBathrooms = typeof bathrooms === "string" || typeof bathrooms === "number" ? Number(bathrooms) : 0
+      const safeSqft = typeof sqft === "string" || typeof sqft === "number" ? Number(sqft) : 0
 
-      // Only create captions if we have valid data
-      if (safeBedrooms > 0 && safeBathrooms > 0 && safeSqft > 0 && safePrice > 0) {
-        const bedroomsWord = numberToWords(safeBedrooms).toUpperCase()
-        const bathroomsWord = numberToWords(safeBathrooms).toUpperCase()
-
-        // Create feature captions with safe timing
-        const features = [
-          { text: `${bedroomsWord} BEDROOMS`, type: "feature" as const, timing: 0.15 },
-          { text: `${bathroomsWord} BATHROOMS`, type: "feature" as const, timing: 0.25 },
-          { text: `${safeSqft.toLocaleString()} SQUARE FEET`, type: "feature" as const, timing: 0.35 },
-          { text: `$${safePrice.toLocaleString()}`, type: "price" as const, timing: 0.65 },
+      // Only proceed if we have valid data
+      if (safeAddress && safePrice > 0 && safeBedrooms > 0 && safeBathrooms > 0 && safeSqft > 0) {
+        // Create property detail captions with specific timing
+        const propertyDetails = [
+          {
+            text: `${safeBedrooms} ${safeBedrooms === 1 ? "BEDROOM" : "BEDROOMS"}`,
+            type: "bedrooms" as const,
+            startTime: duration * 0.15,
+            duration: 2.5,
+          },
+          {
+            text: `${safeBathrooms} ${safeBathrooms === 1 ? "BATHROOM" : "BATHROOMS"}`,
+            type: "bathrooms" as const,
+            startTime: duration * 0.25,
+            duration: 2.5,
+          },
+          {
+            text: `${safeSqft.toLocaleString()} SQ FT`,
+            type: "sqft" as const,
+            startTime: duration * 0.35,
+            duration: 2.5,
+          },
+          {
+            text: `$${safePrice.toLocaleString()}`,
+            type: "price" as const,
+            startTime: duration * 0.65,
+            duration: 3.0,
+          },
         ]
 
-        // Add location caption safely
-        try {
+        // Add location caption
+        if (safeAddress.length > 0) {
           const locationText = safeAddress.includes(",")
             ? safeAddress.split(",")[0].trim().toUpperCase()
             : safeAddress.toUpperCase()
 
-          if (locationText && locationText.length > 0) {
-            features.push({
+          if (locationText.length > 0 && locationText.length < 50) {
+            propertyDetails.push({
               text: locationText,
               type: "location" as const,
-              timing: 0.75,
+              startTime: duration * 0.75,
+              duration: 2.5,
             })
-          }
-        } catch (locationError) {
-          console.warn("Location processing error:", locationError)
-        }
-
-        // Add property description highlights safely
-        if (propertyDescription && typeof propertyDescription === "string" && propertyDescription.trim()) {
-          try {
-            const highlights = propertyDescription
-              .split(/[,.!]/)
-              .map((s) => s.trim())
-              .filter((s) => s && s.length > 5 && s.length < 30)
-              .slice(0, 2)
-
-            highlights.forEach((highlight, index) => {
-              if (highlight && typeof highlight === "string") {
-                features.push({
-                  text: highlight.toUpperCase(),
-                  type: "amenity" as const,
-                  timing: 0.45 + index * 0.1,
-                })
-              }
-            })
-          } catch (descError) {
-            console.warn("Description processing error:", descError)
           }
         }
 
-        // Convert features to captions with safe timing
-        features.forEach((feature) => {
-          try {
-            if (feature.text && typeof feature.text === "string" && feature.text.length > 0) {
-              const startTime = Math.max(0, duration * feature.timing)
-              const endTime = Math.min(duration - 0.5, startTime + 2.5)
+        // Add key features from description
+        if (typeof propertyDescription === "string" && propertyDescription.trim()) {
+          const features = propertyDescription
+            .split(/[,.!;]/)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 3 && s.length < 25)
+            .slice(0, 2) // Max 2 features
 
-              if (startTime < endTime) {
-                captions.push({
-                  text: feature.text,
-                  startTime,
-                  endTime,
-                  type: feature.type,
-                })
-              }
-            }
-          } catch (featureError) {
-            console.warn("Feature processing error:", feature, featureError)
+          features.forEach((feature, index) => {
+            propertyDetails.push({
+              text: feature.toUpperCase(),
+              type: "feature" as const,
+              startTime: duration * (0.45 + index * 0.1),
+              duration: 2.0,
+            })
+          })
+        }
+
+        // Convert to caption format with safe timing
+        propertyDetails.forEach((detail) => {
+          const startTime = Math.max(0, detail.startTime)
+          const endTime = Math.min(duration - 0.5, startTime + detail.duration)
+
+          if (startTime < endTime && detail.text && detail.text.length > 0) {
+            captions.push({
+              text: detail.text,
+              startTime,
+              endTime,
+              type: detail.type,
+            })
           }
         })
       }
@@ -360,7 +354,7 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
       console.error("Caption generation error:", error)
     }
 
-    console.log(`✅ Generated ${captions.length} captions:`, captions)
+    console.log(`✅ Generated ${captions.length} property captions`)
     return captions
   }
 
@@ -395,8 +389,6 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
 
       // Step 1: Generate audio (0-15%)
       setProgress(5)
-      console.log("🎵 Generating Rachel voice audio...")
-
       const audioResponse = await fetch("/api/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -409,17 +401,13 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
       }
 
       const { audioUrl, duration } = await audioResponse.json()
-      console.log(`✅ Audio generated: ${audioUrl}, duration: ${duration}s`)
       setProgress(15)
 
-      // Step 2: Generate FIXED captions (15-20%)
-      console.log("📝 Generating fixed captions...")
-      const captions = generateKeyFeatureCaptions(duration)
-      console.log(`✅ Generated ${captions.length} captions`)
+      // Step 2: Generate property captions (15-20%)
+      const captions = generatePropertyCaptions(duration)
       setProgress(20)
 
       // Step 3: Load images (20-35%)
-      console.log("🖼️ Loading images...")
       const imageUrls = successfulImages.map((img) => img.blobUrl!)
       const loadedImages: HTMLImageElement[] = []
 
@@ -437,29 +425,24 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
         throw new Error("No images could be loaded")
       }
 
-      console.log(`✅ Loaded ${loadedImages.length} images`)
       setProgress(35)
 
-      // Step 4: Setup audio element - NO PREVIEW PLAYING (35-40%)
-      console.log("🔧 Setting up audio element...")
+      // Step 4: Setup audio element (35-40%) - SILENT
       audio.src = audioUrl
       audio.preload = "auto"
       audio.crossOrigin = "anonymous"
       audio.volume = 1.0
-      audio.muted = true // MUTED TO PREVENT PREVIEW PLAYING
+      audio.muted = true // MUTED - NO PREVIEW
       audio.loop = false
-      audio.autoplay = false // NO AUTOPLAY
+      audio.autoplay = false
 
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error("Audio loading timeout"))
-        }, 10000)
+        const timeout = setTimeout(() => reject(new Error("Audio loading timeout")), 10000)
 
         const onCanPlay = () => {
           clearTimeout(timeout)
           audio.removeEventListener("canplaythrough", onCanPlay)
           audio.removeEventListener("error", onError)
-          console.log("✅ Audio loaded and ready (no preview playing)")
           resolve()
         }
 
@@ -477,47 +460,23 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
 
       setProgress(40)
 
-      // Step 5: Setup recording with FIXED AUDIO CAPTURE (40-45%)
-      console.log("🎬 Setting up recording with fixed audio...")
-
-      // Create audio context for proper audio capture
+      // Step 5: Setup recording (40-45%)
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-
       if (audioContext.state === "suspended") {
         await audioContext.resume()
       }
 
-      // Create audio source and destination
       const audioSource = audioContext.createMediaElementSource(audio)
       const audioDestination = audioContext.createMediaStreamDestination()
-
-      // Connect audio source to destination (this captures the audio)
       audioSource.connect(audioDestination)
-      // DO NOT connect to speakers to prevent preview playing
-      // audioSource.connect(audioContext.destination) // REMOVED
+      // NO connection to speakers - silent generation
 
-      // Get canvas stream
       const canvasStream = canvas.captureStream(30)
-
-      // Create combined stream
       const combinedStream = new MediaStream()
 
-      // Add video tracks
-      canvasStream.getVideoTracks().forEach((track) => {
-        combinedStream.addTrack(track)
-      })
+      canvasStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track))
+      audioDestination.stream.getAudioTracks().forEach((track) => combinedStream.addTrack(track))
 
-      // Add audio tracks
-      audioDestination.stream.getAudioTracks().forEach((track) => {
-        combinedStream.addTrack(track)
-      })
-
-      console.log("📊 Stream tracks:", {
-        video: combinedStream.getVideoTracks().length,
-        audio: combinedStream.getAudioTracks().length,
-      })
-
-      // Create MediaRecorder with WebM format
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: "video/webm;codecs=vp9,opus",
         videoBitsPerSecond: 2500000,
@@ -527,7 +486,7 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
       const chunks: Blob[] = []
       setProgress(45)
 
-      // Step 6: Record video with FIXED audio sync (45-75%)
+      // Step 6: Record video (45-75%)
       await new Promise<void>((resolve, reject) => {
         mediaRecorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
@@ -536,10 +495,7 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
         }
 
         mediaRecorder.onstop = async () => {
-          console.log("🎬 Recording stopped, processing...")
-
           try {
-            // Clean up audio context
             await audioContext.close()
           } catch (e) {
             console.warn("Audio context cleanup:", e)
@@ -551,11 +507,9 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
             }
 
             const webmBlob = new Blob(chunks, { type: "video/webm" })
-            console.log(`📦 WebM blob size: ${webmBlob.size} bytes`)
             setProgress(75)
 
-            // Step 7: Convert WebM to MP4 (75-95%)
-            console.log("🔄 Converting to MP4...")
+            // Step 7: Convert to MP4 (75-95%)
             const formData = new FormData()
             formData.append("webm", webmBlob)
 
@@ -565,8 +519,7 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
             })
 
             if (!convertResponse.ok) {
-              console.warn("⚠️ MP4 conversion failed, using WebM")
-              // Fallback to WebM if conversion fails
+              // Fallback to WebM
               const videoUrl = URL.createObjectURL(webmBlob)
               setVideoUrl(videoUrl)
 
@@ -582,10 +535,9 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
             }
 
             const { mp4Url } = await convertResponse.json()
-            console.log("✅ MP4 conversion successful:", mp4Url)
             setProgress(95)
 
-            // Download MP4
+            // Auto-download MP4
             const link = document.createElement("a")
             link.href = mp4Url
             link.download = "property-video.mp4"
@@ -597,23 +549,20 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
             setVideoUrl(mp4Url)
             resolve()
           } catch (error) {
-            console.error("❌ Processing error:", error)
+            console.error("Processing error:", error)
             reject(error)
           }
         }
 
         mediaRecorder.onerror = (event) => {
-          console.error("❌ MediaRecorder error:", event)
+          console.error("MediaRecorder error:", event)
           reject(new Error("Recording failed"))
         }
 
         // Start recording
-        console.log("🎬 Starting recording...")
         mediaRecorder.start(100)
-
-        // Start audio playback - MUTED SO NO PREVIEW PLAYS
         audio.currentTime = 0
-        audio.muted = false // Unmute for recording but not connected to speakers
+        audio.muted = false // Unmute for recording only
         audio.play().catch(console.error)
 
         const startTime = Date.now()
@@ -625,26 +574,18 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
           const elapsedSeconds = elapsed / 1000
 
           if (elapsed >= durationMs) {
-            console.log("🏁 Animation complete, stopping recording...")
             audio.pause()
             mediaRecorder.stop()
             return
           }
 
-          // Calculate current image
           const imageIndex = Math.min(Math.floor(elapsed / timePerImageMs), loadedImages.length - 1)
 
-          // Find current caption with SAFE lookup
-          let currentCaption: Caption | undefined
-          try {
-            currentCaption = captions.find(
-              (caption) => caption && elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
-            )
-          } catch (captionError) {
-            console.warn("Caption lookup error:", captionError)
-          }
+          // Find current caption
+          const currentCaption = captions.find(
+            (caption) => elapsedSeconds >= caption.startTime && elapsedSeconds <= caption.endTime,
+          )
 
-          // Draw current image
           const img = loadedImages[imageIndex]
           if (img) {
             // Clear canvas
@@ -660,86 +601,73 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
 
             ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
 
-            // Draw FIXED captions
-            if (currentCaption && currentCaption.text && typeof currentCaption.text === "string") {
-              try {
-                const fontSize = Math.floor(canvas.width * 0.09)
-                ctx.font = `900 ${fontSize}px Arial, sans-serif`
-                ctx.textAlign = "center"
+            // Draw property captions
+            if (currentCaption && currentCaption.text) {
+              const fontSize = Math.floor(canvas.width * 0.08)
+              ctx.font = `900 ${fontSize}px Arial, sans-serif`
+              ctx.textAlign = "center"
 
-                // Caption styling based on type
-                let captionColor = "#FFFF00" // Default yellow
-                if (currentCaption.type === "price") captionColor = "#00FF00" // Green for price
-                if (currentCaption.type === "location") captionColor = "#FF6B6B" // Red for location
-                if (currentCaption.type === "amenity") captionColor = "#4ECDC4" // Teal for amenities
+              // Caption colors by type
+              let captionColor = "#FFFF00"
+              if (currentCaption.type === "price") captionColor = "#00FF00"
+              if (currentCaption.type === "location") captionColor = "#FF6B6B"
+              if (currentCaption.type === "bedrooms") captionColor = "#4ECDC4"
+              if (currentCaption.type === "bathrooms") captionColor = "#9B59B6"
+              if (currentCaption.type === "sqft") captionColor = "#F39C12"
+              if (currentCaption.type === "feature") captionColor = "#E74C3C"
 
-                const words = currentCaption.text.split(" ").filter((word) => word && word.length > 0)
-                const lines: string[] = []
+              const words = currentCaption.text.split(" ")
+              const lines: string[] = []
 
-                // Break into lines (max 2 words per line for impact)
-                for (let i = 0; i < words.length; i += 2) {
-                  const line = words.slice(i, i + 2).join(" ")
-                  if (line && line.trim().length > 0) {
-                    lines.push(line)
-                  }
-                }
-
-                const lineHeight = fontSize * 1.2
-                const startY = canvas.height * 0.7
-
-                lines.forEach((line, lineIndex) => {
-                  if (line && typeof line === "string" && line.trim().length > 0) {
-                    const y = startY + lineIndex * lineHeight
-
-                    // Black outline for readability
-                    ctx.strokeStyle = "#000000"
-                    ctx.lineWidth = Math.floor(fontSize * 0.15)
-                    ctx.strokeText(line, canvas.width / 2, y)
-
-                    // Colored text
-                    ctx.fillStyle = captionColor
-                    ctx.fillText(line, canvas.width / 2, y)
-                  }
-                })
-              } catch (captionDrawError) {
-                console.warn("Caption drawing error:", captionDrawError)
+              // Break into lines (max 2 words per line)
+              for (let i = 0; i < words.length; i += 2) {
+                lines.push(words.slice(i, i + 2).join(" "))
               }
+
+              const lineHeight = fontSize * 1.2
+              const startY = canvas.height * 0.7
+
+              lines.forEach((line, lineIndex) => {
+                const y = startY + lineIndex * lineHeight
+
+                // Black outline
+                ctx.strokeStyle = "#000000"
+                ctx.lineWidth = Math.floor(fontSize * 0.15)
+                ctx.strokeText(line, canvas.width / 2, y)
+
+                // Colored text
+                ctx.fillStyle = captionColor
+                ctx.fillText(line, canvas.width / 2, y)
+              })
             }
 
-            // Property info overlay with COMPLETE null safety
-            try {
-              ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
-              ctx.fillRect(0, 0, canvas.width, 80)
+            // Property info overlay
+            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
+            ctx.fillRect(0, 0, canvas.width, 80)
 
-              ctx.fillStyle = "#FFFFFF"
-              ctx.font = "bold 16px Arial"
-              ctx.textAlign = "left"
-              const displayAddress = (address && typeof address === "string" && address.trim()) || "Property"
-              ctx.fillText(displayAddress, 15, 25)
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "bold 16px Arial"
+            ctx.textAlign = "left"
+            ctx.fillText(address || "Property", 15, 25)
 
-              ctx.fillStyle = "#FFD700"
-              ctx.font = "bold 14px Arial"
-              const displayPrice = price && !isNaN(Number(price)) && Number(price) > 0 ? Number(price) : 0
-              ctx.fillText(`$${displayPrice.toLocaleString()}`, 15, 45)
+            ctx.fillStyle = "#FFD700"
+            ctx.font = "bold 14px Arial"
+            ctx.fillText(`$${Number(price || 0).toLocaleString()}`, 15, 45)
 
-              ctx.fillStyle = "#FFFFFF"
-              ctx.font = "12px Arial"
-              const safeBedrooms = bedrooms && isNaN(Number(bedrooms)) ? Number(bedrooms) : 0
-              const safeBathrooms = bathrooms && isNaN(Number(bathrooms)) ? Number(bathrooms) : 0
-              const safeSqft = sqft && isNaN(Number(sqft)) ? Number(sqft) : 0
-              const bedroomsText = safeBedrooms === 1 ? "bedroom" : "bedrooms"
-              const bathroomsText = safeBathrooms === 1 ? "bathroom" : "bathrooms"
-              ctx.fillText(
-                `${safeBedrooms} ${bedroomsText} • ${safeBathrooms} ${bathroomsText} • ${safeSqft.toLocaleString()} sqft`,
-                15,
-                65,
-              )
-            } catch (overlayError) {
-              console.warn("Overlay drawing error:", overlayError)
-            }
+            ctx.fillStyle = "#FFFFFF"
+            ctx.font = "12px Arial"
+            const safeBedrooms = Number(bedrooms || 0)
+            const safeBathrooms = Number(bathrooms || 0)
+            const safeSqft = Number(sqft || 0)
+            const bedroomsText = safeBedrooms === 1 ? "bedroom" : "bedrooms"
+            const bathroomsText = safeBathrooms === 1 ? "bathroom" : "bathrooms"
+            ctx.fillText(
+              `${safeBedrooms} ${bedroomsText} • ${safeBathrooms} ${bathroomsText} • ${safeSqft.toLocaleString()} sqft`,
+              15,
+              65,
+            )
           }
 
-          // Update progress
           const recordingProgress = 45 + (elapsed / durationMs) * 30
           setProgress(Math.min(75, recordingProgress))
 
@@ -751,9 +679,8 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
 
       setProgress(100)
       setIsGenerating(false)
-      console.log("🎉 Video generation completed successfully!")
     } catch (error) {
-      console.error("❌ Video generation error:", error)
+      console.error("Video generation error:", error)
       setError(error instanceof Error ? error.message : "Video generation failed")
       setIsGenerating(false)
       setProgress(0)
@@ -1011,7 +938,7 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
               />
             </div>
 
-            {/* Progress Bar */}
+            {/* Progress Bar - CLEAN */}
             {isGenerating && (
               <div className="space-y-2">
                 <Progress value={progress} className="h-4" />
@@ -1067,32 +994,14 @@ Priced at ${safePrice.toLocaleString()} dollars, this property is an incredible 
           </Alert>
         )}
 
-        {/* Success Message */}
+        {/* CLEAN SUCCESS - NO NOISE */}
         {videoUrl && !isGenerating && (
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
             <CardContent className="p-6">
               <div className="text-center space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-                  <div className="flex items-center justify-center gap-2 text-green-700">
-                    <CheckCircle className="h-6 w-6" />
-                    <span className="font-bold text-lg">✅ MP4 Video Generated & Downloaded!</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <Button onClick={resetForm} variant="outline" className="flex-1 bg-transparent">
-                    Generate Another
-                  </Button>
-                  <Button
-                    asChild
-                    className="flex-1 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-lg h-12"
-                  >
-                    <a href={videoUrl} download="property-video.mp4">
-                      <Download className="mr-2 h-5 w-5" />
-                      Download MP4 Again
-                    </a>
-                  </Button>
-                </div>
+                <Button onClick={resetForm} variant="outline" className="w-full bg-transparent">
+                  Generate Another Video
+                </Button>
               </div>
             </CardContent>
           </Card>

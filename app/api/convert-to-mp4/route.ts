@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { put } from "@vercel/blob"
 
 export const maxDuration = 60
 
@@ -11,13 +12,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No WebM file provided" }, { status: 400 })
     }
 
-    console.log("🔄 Converting WebM to MP4 with Fal AI...")
+    console.log(`🔄 Converting WebM (${webmFile.size} bytes) to MP4...`)
 
-    // Convert File to ArrayBuffer
+    // Check file size (max 100MB)
+    if (webmFile.size > 100 * 1024 * 1024) {
+      return NextResponse.json({ error: "File too large for conversion" }, { status: 413 })
+    }
+
+    // Convert to ArrayBuffer and then base64
     const webmBuffer = await webmFile.arrayBuffer()
     const webmBase64 = Buffer.from(webmBuffer).toString("base64")
+    const dataUrl = `data:video/webm;base64,${webmBase64}`
 
-    // Use Fal AI for video conversion
+    // Use Fal AI for conversion
     const response = await fetch("https://fal.run/fal-ai/ffmpeg", {
       method: "POST",
       headers: {
@@ -25,28 +32,52 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        video_url: `data:video/webm;base64,${webmBase64}`,
-        codec: "libx264",
-        container: "mp4",
-        video_bitrate: 2000,
-        audio_bitrate: 128,
-        preset: "medium",
-        crf: 23,
+        video_url: dataUrl,
+        ffmpeg_args: [
+          "-i",
+          "input.webm",
+          "-c:v",
+          "libx264",
+          "-c:a",
+          "aac",
+          "-preset",
+          "medium",
+          "-crf",
+          "23",
+          "-movflags",
+          "+faststart",
+          "-f",
+          "mp4",
+          "output.mp4",
+        ],
       }),
     })
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("Fal AI conversion error:", errorText)
-      throw new Error(`Fal AI conversion failed: ${response.status}`)
+      console.error("Fal AI conversion failed:", errorText)
+      throw new Error(`Conversion failed: ${response.status}`)
     }
 
     const result = await response.json()
-    console.log("✅ MP4 conversion successful")
+
+    if (!result.video_url) {
+      throw new Error("No video URL in conversion result")
+    }
+
+    // Upload converted MP4 to Vercel Blob
+    const mp4Response = await fetch(result.video_url)
+    const mp4Buffer = await mp4Response.arrayBuffer()
+
+    const blob = await put(`videos/property-${Date.now()}.mp4`, mp4Buffer, {
+      access: "public",
+      contentType: "video/mp4",
+    })
+
+    console.log("✅ MP4 conversion successful:", blob.url)
 
     return NextResponse.json({
-      mp4Url: result.video_url,
-      success: true,
+      mp4Url: blob.url,
     })
   } catch (error) {
     console.error("MP4 conversion error:", error)
