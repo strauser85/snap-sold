@@ -3,6 +3,9 @@
     "app/api/upload-image/route.ts": {
       "maxDuration": 30
     },
+    "app/api/upload-video/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/generate-script/route.ts": {
       "maxDuration": 30
     },

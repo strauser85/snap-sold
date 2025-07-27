@@ -41,6 +41,7 @@ function VideoGenerator() {
   const [scriptError, setScriptError] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [progressMessage, setProgressMessage] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isVideoGenerated, setIsVideoGenerated] = useState(false)
@@ -65,14 +66,14 @@ function VideoGenerator() {
 
     setUploadedImages((prev) => [...prev, ...newImages])
 
-    // Process images sequentially
+    // Process images sequentially to avoid overwhelming the server
     for (const image of newImages) {
       try {
-        // Step 1: Compress image to prevent 413 errors
+        // Step 1: Compress image to prevent 413 errors and resize to 1280px max width
         updateImageStatus(image.id, "compressing")
         const compressedFile = await imageCompression(image.file, {
-          maxSizeMB: 2, // Compress to under 2MB
-          maxWidthOrHeight: 1920,
+          maxSizeMB: 3, // Compress to under 3MB
+          maxWidthOrHeight: 1280, // Resize to 1280px max width
           useWebWorker: true,
           fileType: "image/jpeg",
           initialQuality: 0.8,
@@ -102,7 +103,7 @@ function VideoGenerator() {
         updateImageStatus(image.id, "error", { error: errorMessage })
       }
     }
-    e.target.value = ""
+    e.target.value = "" // Allow re-uploading
   }
 
   const removeImage = (id: string) => {
@@ -113,6 +114,42 @@ function VideoGenerator() {
       }
       return prev.filter((img) => img.id !== id)
     })
+  }
+
+  const retryFailedUploads = async () => {
+    const failedImages = uploadedImages.filter((img) => img.status === "error")
+
+    for (const image of failedImages) {
+      try {
+        updateImageStatus(image.id, "compressing")
+        const compressedFile = await imageCompression(image.file, {
+          maxSizeMB: 3,
+          maxWidthOrHeight: 1280,
+          useWebWorker: true,
+          fileType: "image/jpeg",
+          initialQuality: 0.8,
+        })
+
+        updateImageStatus(image.id, "uploading")
+        const formData = new FormData()
+        formData.append("file", compressedFile)
+
+        const response = await fetch("/api/upload-image", {
+          method: "POST",
+          body: formData,
+        })
+
+        const result = await response.json()
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Upload failed")
+        }
+
+        updateImageStatus(image.id, "success", { blobUrl: result.url })
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Upload failed"
+        updateImageStatus(image.id, "error", { error: errorMessage })
+      }
+    }
   }
 
   const generateAIScript = async () => {
@@ -193,7 +230,7 @@ function VideoGenerator() {
     // Extract special features from description
     if (propertyDescription) {
       const features = propertyDescription.match(
-        /pool|garage|fireplace|deck|patio|yard|upgraded|renovated|corner lot|detached/gi,
+        /pool|garage|fireplace|deck|patio|yard|upgraded|renovated|corner lot|detached|shop/gi,
       )
       if (features && features.length > 0) {
         caps.push({
@@ -224,6 +261,7 @@ function VideoGenerator() {
       document.body.removeChild(a)
     } catch (error) {
       console.error("Download failed:", error)
+      setError("Download failed. Please try again.")
     }
   }
 
@@ -243,10 +281,12 @@ function VideoGenerator() {
     setVideoUrl(null)
     setIsVideoGenerated(false)
     setProgress(0)
+    setProgressMessage("Starting video generation...")
 
     try {
       // Step 1: Generate Rachel's voiceover
-      setProgress(15)
+      setProgress(10)
+      setProgressMessage("Generating Rachel's voiceover...")
       const audioResp = await fetch("/api/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -265,11 +305,13 @@ function VideoGenerator() {
       console.log(`🎤 Rachel voiceover generated: ${duration}s duration`)
 
       // Step 2: Create property feature captions
-      setProgress(25)
+      setProgress(20)
+      setProgressMessage("Creating property captions...")
       const captions = createPropertyCaptions(duration)
 
       // Step 3: Load images
-      setProgress(35)
+      setProgress(30)
+      setProgressMessage("Loading images...")
       const imgs = await Promise.all(
         successfulUploads.map(
           (up) =>
@@ -291,7 +333,8 @@ function VideoGenerator() {
       console.log(`📸 Loaded ${imgs.length} images for video`)
 
       // Step 4: Setup canvas for 9:16 aspect ratio
-      setProgress(45)
+      setProgress(40)
+      setProgressMessage("Setting up video canvas...")
       const canvas = canvasRef.current!
       const ctx = canvas.getContext("2d")!
       canvas.width = 1080
@@ -302,6 +345,8 @@ function VideoGenerator() {
       audio.muted = true // Prevent audio preview during setup
 
       // Step 5: Setup recording
+      setProgress(50)
+      setProgressMessage("Preparing video recording...")
       const stream = canvas.captureStream(30)
       let audioContext: AudioContext | null = null
 
@@ -329,7 +374,8 @@ function VideoGenerator() {
       console.log("🎬 Recording started...")
 
       // Step 6: Render video frames with bright yellow captions
-      setProgress(55)
+      setProgress(60)
+      setProgressMessage("Recording video with captions...")
       const timePerImage = duration / imgs.length
       let frameCount = 0
       const totalFrames = duration * 30
@@ -368,13 +414,13 @@ function VideoGenerator() {
 
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight)
 
-        // Draw bright yellow captions with shadow
+        // Draw bright yellow captions with black shadow for contrast
         captions.forEach((cap) => {
           if (elapsed >= cap.startTime && elapsed <= cap.endTime) {
             ctx.font = "bold 90px Arial"
             ctx.textAlign = "center"
 
-            // Shadow for readability
+            // Black shadow for contrast
             ctx.fillStyle = "#000000"
             ctx.fillText(cap.text, canvas.width / 2 + 4, canvas.height - 296)
 
@@ -384,7 +430,7 @@ function VideoGenerator() {
           }
         })
 
-        const recordingProgress = 55 + (frameCount / totalFrames) * 25
+        const recordingProgress = 60 + (frameCount / totalFrames) * 20
         setProgress(Math.min(recordingProgress, 80))
         frameCount++
         requestAnimationFrame(animate)
@@ -393,65 +439,75 @@ function VideoGenerator() {
 
       // Step 7: Process recording to MP4
       recorder.onstop = async () => {
-        if (audioContext) {
-          try {
+        try {
+          if (audioContext) {
             await audioContext.close()
-          } catch (error) {
-            console.error("Error closing audio context:", error)
           }
+
+          const webmBlob = new Blob(chunks, { type: "video/webm" })
+          console.log(`🎬 Recording complete: ${webmBlob.size} bytes`)
+
+          setProgress(85)
+          setProgressMessage("Uploading video for processing...")
+
+          // Upload WebM for MP4 conversion
+          const formData = new FormData()
+          formData.append("file", webmBlob, "snapsold-video.webm")
+
+          const webmUploadResponse = await fetch("/api/upload-video", {
+            method: "POST",
+            body: formData,
+          })
+
+          if (!webmUploadResponse.ok) {
+            const uploadError = await webmUploadResponse.json()
+            throw new Error(uploadError.error || "Failed to upload video for processing")
+          }
+
+          const { url: webmUrl } = await webmUploadResponse.json()
+
+          setProgress(95)
+          setProgressMessage("Converting to MP4...")
+
+          // Convert to MP4
+          const mp4Response = await fetch("/api/process-video", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ webmUrl }),
+          })
+
+          if (!mp4Response.ok) {
+            const processError = await mp4Response.json()
+            throw new Error(processError.error || "Failed to process video to MP4")
+          }
+
+          const { mp4Url } = await mp4Response.json()
+          if (!mp4Url) throw new Error("MP4 processing failed.")
+
+          console.log("✅ Video generation complete!")
+
+          setVideoUrl(mp4Url)
+          setProgress(100)
+          setProgressMessage("Video generated successfully!")
+          setIsVideoGenerated(true)
+          setIsGenerating(false)
+
+          // Auto-download MP4 without replacing page
+          triggerDownload(mp4Url, "snapsold-property-video.mp4")
+        } catch (err) {
+          console.error("Video processing error:", err)
+          setError(err instanceof Error ? err.message : "Something went wrong. Please try again.")
+          setIsGenerating(false)
+          setProgress(0)
+          setProgressMessage("")
         }
-
-        const webmBlob = new Blob(chunks, { type: "video/webm" })
-        console.log(`🎬 Recording complete: ${webmBlob.size} bytes`)
-
-        setProgress(85)
-
-        // Upload WebM for MP4 conversion
-        const formData = new FormData()
-        formData.append("file", webmBlob, "snapsold-video.webm")
-
-        const webmUploadResponse = await fetch("/api/upload-image", {
-          method: "POST",
-          body: formData,
-        })
-
-        if (!webmUploadResponse.ok) {
-          throw new Error("Failed to upload video for processing")
-        }
-
-        const { url: webmUrl } = await webmUploadResponse.json()
-
-        setProgress(95)
-
-        // Convert to MP4
-        const mp4Response = await fetch("/api/process-video", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ webmUrl }),
-        })
-
-        if (!mp4Response.ok) {
-          throw new Error("Failed to process video to MP4")
-        }
-
-        const { mp4Url } = await mp4Response.json()
-        if (!mp4Url) throw new Error("MP4 processing failed.")
-
-        console.log("✅ Video generation complete!")
-
-        setVideoUrl(mp4Url)
-        setProgress(100)
-        setIsVideoGenerated(true)
-        setIsGenerating(false)
-
-        // Auto-download MP4
-        triggerDownload(mp4Url, "snapsold-property-video.mp4")
       }
     } catch (err) {
       console.error("Video generation error:", err)
-      setError(err instanceof Error ? err.message : "Video generation failed.")
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.")
       setIsGenerating(false)
       setProgress(0)
+      setProgressMessage("")
     }
   }
 
@@ -459,6 +515,7 @@ function VideoGenerator() {
     setVideoUrl(null)
     setIsVideoGenerated(false)
     setProgress(0)
+    setProgressMessage("")
     setError(null)
   }
 
@@ -557,14 +614,21 @@ function VideoGenerator() {
 
             {/* Image Upload Section with Thumbnails */}
             <div className="space-y-3">
-              <Label>
-                Upload Property Photos (up to {MAX_IMAGES})
-                {uploadedImages.length > 0 && (
-                  <span className="ml-2 text-sm text-gray-500">
-                    {successfulUploadCount} uploaded, {uploadingCount} uploading, {failedCount} failed
-                  </span>
+              <div className="flex items-center justify-between">
+                <Label>
+                  Upload Property Photos (up to {MAX_IMAGES})
+                  {uploadedImages.length > 0 && (
+                    <span className="ml-2 text-sm text-gray-500">
+                      {successfulUploadCount} uploaded, {uploadingCount} uploading, {failedCount} failed
+                    </span>
+                  )}
+                </Label>
+                {failedCount > 0 && (
+                  <Button onClick={retryFailedUploads} variant="outline" size="sm" disabled={isGenerating}>
+                    Retry Failed
+                  </Button>
                 )}
-              </Label>
+              </div>
 
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
                 <UploadCloud className="mx-auto h-12 w-12 text-gray-400 mb-4" />
@@ -583,7 +647,7 @@ function VideoGenerator() {
                     disabled={isGenerating || uploadedImages.length >= MAX_IMAGES}
                   />
                 </label>
-                <p className="text-sm text-gray-500 mt-2">JPG, PNG, WebP • Auto-compressed for optimal upload</p>
+                <p className="text-sm text-gray-500 mt-2">JPG, PNG, WebP • Auto-resized to 1280px max width</p>
               </div>
 
               {/* Thumbnail Previews */}
@@ -686,11 +750,11 @@ function VideoGenerator() {
               />
             </div>
 
-            {/* Progress Bar - Only show percentage */}
+            {/* Progress Bar with Message */}
             {isGenerating && (
               <div className="space-y-2">
                 <Progress value={progress} className="w-full h-3" />
-                <p className="text-center text-sm text-gray-600">{Math.round(progress)}%</p>
+                <p className="text-center text-sm text-gray-600">{progressMessage}</p>
               </div>
             )}
 

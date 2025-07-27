@@ -20,6 +20,10 @@ function formatAddressNumber(num: string): string {
     const first = Number.parseInt(num.substring(0, 2))
     const second = Number.parseInt(num.substring(2, 4))
     return `${numberToWords(first)} ${numberToWords(second)}`
+  } else if (num.length === 3) {
+    const first = Number.parseInt(num.substring(0, 1))
+    const second = Number.parseInt(num.substring(1, 3))
+    return `${numberToWords(first)} ${numberToWords(second)}`
   } else {
     return numberToWords(Number.parseInt(num))
   }
@@ -134,7 +138,7 @@ function cleanAddressForSpeech(address: string): string {
   let cleanAddress = address.replace(/\b\d{5}(-\d{4})?\b/g, "")
 
   // Format address numbers (like house numbers)
-  cleanAddress = cleanAddress.replace(/\b(\d{4,5})\b/g, (match) => {
+  cleanAddress = cleanAddress.replace(/\b(\d{3,5})\b/g, (match) => {
     return formatAddressNumber(match)
   })
 
@@ -171,22 +175,22 @@ export async function POST(request: NextRequest) {
     const bathroomsText = formatBathrooms(numBathrooms)
     const sqftText = formatSquareFeet(numSqft)
 
-    // Build clean, engaging script
+    // Build clean, engaging script without duplication
     let script = ""
 
     // Opening hook
     script += `Welcome to this stunning property at ${speechAddress}! `
 
-    // Core features - avoid repetition
-    script += `This beautiful home offers ${bedroomsText} and ${bathroomsText}, `
+    // Core features - mention once only
+    script += `This beautiful home features ${bedroomsText} and ${bathroomsText}, `
     script += `with ${sqftText} of gorgeous living space. `
 
-    // Integrate user description smoothly
+    // Integrate user description smoothly without duplicating basic info
     if (propertyDescription && propertyDescription.trim()) {
-      const cleanDescription = propertyDescription.trim()
+      let cleanDescription = propertyDescription.trim()
 
-      // Remove redundant info to avoid duplication
-      const filteredDescription = cleanDescription
+      // Remove redundant bedroom/bathroom/sqft info to avoid duplication
+      cleanDescription = cleanDescription
         .replace(/\d+\s*(bed|bedroom|br)\w*/gi, "")
         .replace(/\d+\.?\d*\s*(bath|bathroom|ba)\w*/gi, "")
         .replace(/\d+\s*(sq\s*ft|square\s*feet)\w*/gi, "")
@@ -194,23 +198,27 @@ export async function POST(request: NextRequest) {
         .replace(/\s+/g, " ")
         .trim()
 
-      if (filteredDescription) {
-        script += `You'll love the ${filteredDescription.toLowerCase()}. `
+      if (cleanDescription) {
+        // Add natural transition and integrate smoothly
+        script += `You'll love the ${cleanDescription.toLowerCase()}. `
       }
     }
 
     // Price reveal
     script += `And the best part? It's priced at just ${priceText}! `
 
-    // Call to action
-    script += `This incredible home won't last long. Message me today to schedule your private showing!`
+    // Strong call to action
+    script += `This incredible home won't last long in today's market. Message me today to schedule your private showing!`
 
-    // Clean up formatting
+    // Clean up formatting and fix spacing issues
     const finalScript = script
-      .replace(/\s+/g, " ")
-      .replace(/\.\s*\./g, ".")
-      .replace(/!\s*!/g, "!")
+      .replace(/\s+/g, " ") // Fix multiple spaces
+      .replace(/\.\s*\./g, ".") // Fix double periods
+      .replace(/!\s*!/g, "!") // Fix double exclamations
+      .replace(/,\s*,/g, ",") // Fix double commas
       .trim()
+
+    console.log(`📝 Generated script: ${finalScript.length} characters`)
 
     return NextResponse.json({
       script: finalScript,

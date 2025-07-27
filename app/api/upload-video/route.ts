@@ -2,7 +2,7 @@ import { put } from "@vercel/blob"
 import { type NextRequest, NextResponse } from "next/server"
 
 export const runtime = "nodejs"
-export const maxDuration = 30
+export const maxDuration = 60
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,55 +14,58 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ["video/webm", "video/mp4", "video/mov", "video/avi"]
+    const allowedTypes = ["video/webm", "video/mp4"]
     if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json(
-        {
-          error: "Invalid video format. Please upload WebM, MP4, MOV, or AVI files.",
-        },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: "Invalid video type. Please upload WebM or MP4." }, { status: 400 })
     }
 
-    // Validate file size - 100MB max
+    // Check file size (100MB max)
     if (file.size > 100 * 1024 * 1024) {
-      return NextResponse.json(
-        {
-          error: "Video file too large. Maximum size is 100MB.",
-        },
-        { status: 413 },
-      )
+      return NextResponse.json({ error: "Video file too large. Maximum size is 100MB." }, { status: 413 })
     }
+
+    console.log(`📹 Uploading video: ${file.size} bytes, type: ${file.type}`)
 
     // Generate unique filename
     const timestamp = Date.now()
     const randomSuffix = Math.random().toString(36).substring(2, 8)
-    const extension = file.name.split(".").pop() || "webm"
-    const filename = `video-${timestamp}-${randomSuffix}.${extension}`
+    const filename = `video-${timestamp}-${randomSuffix}.webm`
 
-    // Upload to Vercel Blob
-    const blob = await put(filename, file, {
+    // Convert File to ArrayBuffer for proper streaming
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = new Uint8Array(arrayBuffer)
+
+    // Upload to Vercel Blob with chunking support
+    const blob = await put(filename, buffer, {
       access: "public",
       addRandomSuffix: false,
+      contentType: file.type,
     })
+
+    console.log(`✅ Video uploaded successfully: ${blob.url}`)
 
     return NextResponse.json({
       success: true,
       url: blob.url,
       filename: filename,
-      size: file.size,
+      size: buffer.length,
       type: file.type,
     })
   } catch (error) {
     console.error("Video upload error:", error)
 
+    // Handle specific error types
     if (error instanceof Error) {
       if (error.message.includes("413") || error.message.includes("too large")) {
         return NextResponse.json(
-          {
-            error: "Video file too large. Please use a file under 100MB.",
-          },
+          { error: "Video file too large. Please try a shorter video or lower quality." },
           { status: 413 },
+        )
+      }
+      if (error.message.includes("timeout")) {
+        return NextResponse.json(
+          { error: "Video upload timeout. Please try again with a smaller file." },
+          { status: 408 },
         )
       }
     }
