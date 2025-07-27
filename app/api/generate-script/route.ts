@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 30
 
-// Convert numbers to natural speech
+// Convert numbers to natural speech with context awareness
 function numberToWords(num: number): string {
   if (num === 0) return "zero"
   if (num < 0) return "negative " + numberToWords(-num)
@@ -76,6 +76,17 @@ function numberToWords(num: number): string {
   return num.toString() // Fallback for very large numbers
 }
 
+// Format address numbers for natural speech (e.g., "38261" -> "three eight two six one")
+function formatAddressNumber(address: string): string {
+  return address.replace(/\b(\d{4,})\b/g, (match) => {
+    // For long numbers like ZIP codes or house numbers, spell out each digit
+    return match
+      .split("")
+      .map((digit) => numberToWords(Number.parseInt(digit)))
+      .join(" ")
+  })
+}
+
 // Format price for natural speech
 function formatPrice(price: number): string {
   return numberToWords(price) + " dollars"
@@ -110,14 +121,16 @@ function formatSquareFeet(sqft: number): string {
   return numberToWords(sqft) + " square feet"
 }
 
-// Clean address for speech (remove ZIP code)
+// Clean address for speech (remove ZIP code and format numbers)
 function cleanAddressForSpeech(address: string): string {
-  // Remove ZIP codes (5 digits or 5+4 format) and clean up
-  return address
-    .replace(/\b\d{5}(-\d{4})?\b/g, "")
-    .replace(/,\s*,/g, ",")
-    .replace(/,\s*$/g, "")
-    .trim()
+  // Remove ZIP codes (5 digits or 5+4 format)
+  let cleanAddress = address.replace(/\b\d{5}(-\d{4})?\b/g, "")
+
+  // Format remaining numbers for natural speech
+  cleanAddress = formatAddressNumber(cleanAddress)
+
+  // Clean up formatting
+  return cleanAddress.replace(/,\s*,/g, ",").replace(/,\s*$/g, "").trim()
 }
 
 export async function POST(request: NextRequest) {
@@ -141,7 +154,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid numeric values" }, { status: 400 })
     }
 
-    // Clean address for speech (remove ZIP)
+    // Clean address for speech
     const speechAddress = cleanAddressForSpeech(address)
 
     // Convert to natural speech
@@ -153,17 +166,18 @@ export async function POST(request: NextRequest) {
     // Build engaging TikTok-style script
     let script = ""
 
-    // Opening hook
-    script += `Check out this incredible property at ${speechAddress}! `
+    // Opening hook with energy
+    script += `Welcome to this stunning property at ${speechAddress}! `
 
-    // Core features
-    script += `This stunning home features ${bedroomsText} and ${bathroomsText}, `
-    script += `with ${sqftText} of beautiful living space. `
+    // Core features - avoid repetition
+    script += `This beautiful home features ${bedroomsText} and ${bathroomsText}, `
+    script += `with ${sqftText} of gorgeous living space. `
 
     // Integrate user description if provided
     if (propertyDescription && propertyDescription.trim()) {
       const cleanDescription = propertyDescription.trim()
-      // Remove any redundant bed/bath info from description
+
+      // Remove redundant bed/bath/sqft info from description to avoid duplication
       const filteredDescription = cleanDescription
         .replace(/\d+\s*(bed|bedroom|br)\w*/gi, "")
         .replace(/\d+\.?\d*\s*(bath|bathroom|ba)\w*/gi, "")
@@ -173,21 +187,25 @@ export async function POST(request: NextRequest) {
         .trim()
 
       if (filteredDescription) {
-        script += `Plus, you'll love ${filteredDescription.toLowerCase()}. `
+        // Add natural transition words
+        const transitions = ["You'll love", "Plus, it features", "It also includes", "Don't miss"]
+        const randomTransition = transitions[Math.floor(Math.random() * transitions.length)]
+        script += `${randomTransition} ${filteredDescription.toLowerCase()}. `
       }
     }
 
-    // Price reveal
-    script += `And the best part? It's priced at just ${priceText}! `
+    // Price reveal with excitement
+    script += `And here's the best part - it's priced at just ${priceText}! `
 
-    // Urgency and call to action
-    script += `This won't last long in today's market. `
-    script += `Schedule a showing today - message me to see it in person!`
+    // Urgency and strong call to action
+    script += `This incredible home won't last long in today's market. `
+    script += `Message me right now to schedule your private showing!`
 
-    // Clean up any double spaces or formatting issues
+    // Clean up any formatting issues
     const finalScript = script
       .replace(/\s+/g, " ")
       .replace(/\.\s*\./g, ".")
+      .replace(/!\s*!/g, "!")
       .trim()
 
     return NextResponse.json({
@@ -198,9 +216,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Script generation error:", error)
 
-    // Return a simple fallback script without any debug info
-    const fallbackScript =
-      "Beautiful property available for showing. Schedule a showing today - message me to see it in person!"
+    // Return a clean fallback script without any debug info
+    const fallbackScript = "Beautiful property available for showing. Message me to schedule your private tour today!"
 
     return NextResponse.json({
       script: fallbackScript,

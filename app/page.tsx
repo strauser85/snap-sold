@@ -40,7 +40,6 @@ function VideoGenerator() {
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [progressMessage, setProgressMessage] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isVideoGenerated, setIsVideoGenerated] = useState(false)
@@ -71,11 +70,14 @@ function VideoGenerator() {
         // Step 1: Compress image to prevent 413 errors
         updateImageStatus(image.id, "compressing")
         const compressedFile = await imageCompression(image.file, {
-          maxSizeMB: 2,
+          maxSizeMB: 1, // Compress to under 1MB
           maxWidthOrHeight: 1920,
           useWebWorker: true,
           fileType: "image/jpeg",
+          initialQuality: 0.8,
         })
+
+        console.log(`📦 Compressed ${image.file.name}: ${image.file.size} → ${compressedFile.size} bytes`)
 
         // Step 2: Upload compressed image using FormData
         updateImageStatus(image.id, "uploading")
@@ -94,7 +96,8 @@ function VideoGenerator() {
 
         updateImageStatus(image.id, "success", { blobUrl: result.url })
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error"
+        const errorMessage = err instanceof Error ? err.message : "Upload failed"
+        console.error(`❌ Upload failed for ${image.file.name}:`, errorMessage)
         updateImageStatus(image.id, "error", { error: errorMessage })
       }
     }
@@ -147,35 +150,62 @@ function VideoGenerator() {
     }
   }
 
-  const createFeatureCaptions = (duration: number): Caption[] => {
+  const createPropertyCaptions = (duration: number): Caption[] => {
     const caps: Caption[] = []
 
-    // Only show key features as captions, not entire voiceover
-    if (bedrooms)
-      caps.push({ text: `${bedrooms} ${Number(bedrooms) === 1 ? "BEDROOM" : "BEDROOMS"}`, startTime: 0, endTime: 0 })
-    if (bathrooms)
+    // Only show key property features as captions - NOT full transcript
+    if (bedrooms) {
+      caps.push({
+        text: `${bedrooms} ${Number(bedrooms) === 1 ? "BEDROOM" : "BEDROOMS"}`,
+        startTime: 0,
+        endTime: 0,
+      })
+    }
+
+    if (bathrooms) {
       caps.push({
         text: `${bathrooms} ${Number(bathrooms) === 1 ? "BATHROOM" : "BATHROOMS"}`,
         startTime: 0,
         endTime: 0,
       })
-    if (sqft) caps.push({ text: `${Number(sqft).toLocaleString()} SQ FT`, startTime: 0, endTime: 0 })
-    if (price) caps.push({ text: `$${Number(price).toLocaleString()}`, startTime: 0, endTime: 0 })
+    }
+
+    if (sqft) {
+      caps.push({
+        text: `${Number(sqft).toLocaleString()} SQ FT`,
+        startTime: 0,
+        endTime: 0,
+      })
+    }
+
+    if (price) {
+      caps.push({
+        text: `$${Number(price).toLocaleString()}`,
+        startTime: 0,
+        endTime: 0,
+      })
+    }
 
     // Extract special features from description
     if (propertyDescription) {
-      const features = propertyDescription.match(/detached shop|corner lot|pool|garage|fireplace|deck|patio/gi)
+      const features = propertyDescription.match(
+        /detached shop|corner lot|pool|garage|fireplace|deck|patio|yard|upgraded|renovated/gi,
+      )
       if (features && features.length > 0) {
-        caps.push({ text: features[0].toUpperCase(), startTime: 0, endTime: 0 })
+        caps.push({
+          text: features[0].toUpperCase(),
+          startTime: 0,
+          endTime: 0,
+        })
       }
     }
 
-    // Distribute captions evenly across the video duration
+    // Distribute captions evenly across video duration, timed with image transitions
     const timePerCaption = duration / Math.max(caps.length, 1)
     return caps.map((cap, i) => ({
       ...cap,
-      startTime: i * timePerCaption + 2, // Start after 2 seconds
-      endTime: (i + 1) * timePerCaption + 1, // Show for reasonable duration
+      startTime: i * timePerCaption + 1, // Start after 1 second
+      endTime: (i + 1) * timePerCaption, // Show for full duration
     }))
   }
 
@@ -208,30 +238,34 @@ function VideoGenerator() {
     setError(null)
     setVideoUrl(null)
     setIsVideoGenerated(false)
+    setProgress(0)
 
     try {
       // Step 1: Generate audio with LOCKED Rachel voice
-      setProgress(10)
-      setProgressMessage("Generating Rachel's voice...")
+      setProgress(15)
       const audioResp = await fetch("/api/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ script: generatedScript }),
       })
-      if (!audioResp.ok) throw new Error("Failed to generate audio with Rachel's voice.")
+
+      if (!audioResp.ok) {
+        const errorData = await audioResp.json()
+        throw new Error(errorData.error || "Failed to generate Rachel's voiceover")
+      }
 
       const audioBlob = await audioResp.blob()
       const audioUrl = URL.createObjectURL(audioBlob)
       const duration = Number(audioResp.headers.get("X-Audio-Duration")) || 30
 
-      // Step 2: Create feature-only captions (not full transcript)
-      setProgress(20)
-      setProgressMessage("Creating feature captions...")
-      const captions = createFeatureCaptions(duration)
+      console.log(`🎤 Rachel voiceover generated: ${duration}s duration`)
 
-      // Step 3: Load images with silent error handling
-      setProgress(30)
-      setProgressMessage("Loading images...")
+      // Step 2: Create property feature captions (not full transcript)
+      setProgress(25)
+      const captions = createPropertyCaptions(duration)
+
+      // Step 3: Load images with error handling
+      setProgress(35)
       const imgs = await Promise.all(
         successfulUploads.map(
           (up) =>
@@ -239,7 +273,10 @@ function VideoGenerator() {
               const img = new Image()
               img.crossOrigin = "anonymous"
               img.onload = () => resolve(img)
-              img.onerror = () => resolve(null) // Silently fail and continue
+              img.onerror = () => {
+                console.warn(`Failed to load image: ${up.blobUrl}`)
+                resolve(null)
+              }
               img.src = up.blobUrl!
             }),
         ),
@@ -247,9 +284,10 @@ function VideoGenerator() {
 
       if (imgs.length === 0) throw new Error("No images could be loaded.")
 
+      console.log(`📸 Loaded ${imgs.length} images for video`)
+
       // Step 4: Setup canvas for 9:16 TikTok aspect ratio
-      setProgress(40)
-      setProgressMessage("Preparing video canvas...")
+      setProgress(45)
       const canvas = canvasRef.current!
       const ctx = canvas.getContext("2d")!
       canvas.width = 1080
@@ -257,7 +295,7 @@ function VideoGenerator() {
 
       const audio = audioRef.current!
       audio.src = audioUrl
-      audio.muted = true
+      audio.muted = true // Prevent autoplay during setup
 
       // Step 5: Setup recording with audio sync
       const stream = canvas.captureStream(30) // 30 FPS
@@ -268,6 +306,7 @@ function VideoGenerator() {
         const source = audioContext.createMediaElementSource(audio)
         const dest = audioContext.createMediaStreamDestination()
         source.connect(dest)
+        source.connect(audioContext.destination) // Also connect to speakers
         dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track))
       } catch (audioError) {
         console.error("Audio context setup failed:", audioError)
@@ -276,18 +315,21 @@ function VideoGenerator() {
 
       const recorder = new MediaRecorder(stream, {
         mimeType: "video/webm;codecs=vp9,opus",
-        videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+        videoBitsPerSecond: 3000000, // 3 Mbps for good quality
       })
       const chunks: Blob[] = []
       recorder.ondataavailable = (e) => chunks.push(e.data)
 
       recorder.start()
+
+      // Start audio playback (unmuted for recording)
       audio.muted = false
       await audio.play()
 
-      // Step 6: Render video frames with feature captions
-      setProgress(50)
-      setProgressMessage("Rendering video frames...")
+      console.log("🎬 Recording started...")
+
+      // Step 6: Render video frames with property captions
+      setProgress(55)
       const timePerImage = duration / imgs.length
       let frameCount = 0
       const totalFrames = duration * 30
@@ -302,24 +344,24 @@ function VideoGenerator() {
         const currentImageIndex = Math.min(Math.floor(elapsed / timePerImage), imgs.length - 1)
         const img = imgs[currentImageIndex]
 
-        // Clear canvas
+        // Clear canvas with black background
         ctx.fillStyle = "#000000"
         ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-        // Draw image with proper aspect ratio
+        // Draw image with proper aspect ratio (fill canvas)
         const imgAspect = img.width / img.height
         const canvasAspect = canvas.width / canvas.height
 
         let drawWidth, drawHeight, drawX, drawY
 
         if (imgAspect > canvasAspect) {
-          // Image is wider - fit height
+          // Image is wider - fit height and crop sides
           drawHeight = canvas.height
           drawWidth = drawHeight * imgAspect
           drawX = (canvas.width - drawWidth) / 2
           drawY = 0
         } else {
-          // Image is taller - fit width
+          // Image is taller - fit width and crop top/bottom
           drawWidth = canvas.width
           drawHeight = drawWidth / imgAspect
           drawX = 0
@@ -328,28 +370,31 @@ function VideoGenerator() {
 
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight)
 
-        // Draw feature captions only (bright yellow with black outline)
+        // Draw property feature captions (bright yellow, bold, large)
         captions.forEach((cap) => {
           if (elapsed >= cap.startTime && elapsed <= cap.endTime) {
-            ctx.font = "bold 82px Arial"
+            // Large, bold, bright yellow text
+            ctx.font = "bold 90px Arial"
             ctx.textAlign = "center"
-            ctx.fillStyle = "#FFD700" // Bright yellow
+            ctx.fillStyle = "#FFFF00" // Bright yellow
             ctx.strokeStyle = "#000000" // Black outline
-            ctx.lineWidth = 8
+            ctx.lineWidth = 6
 
-            const y = canvas.height - 250 // Lower third positioning
+            const y = canvas.height - 300 // Lower third positioning
             ctx.strokeText(cap.text, canvas.width / 2, y)
             ctx.fillText(cap.text, canvas.width / 2, y)
           }
         })
 
-        setProgress(50 + (frameCount / totalFrames) * 30)
+        // Update progress
+        const recordingProgress = 55 + (frameCount / totalFrames) * 25
+        setProgress(Math.min(recordingProgress, 80))
         frameCount++
         requestAnimationFrame(animate)
       }
       animate()
 
-      // Step 7: Process recording and convert to MP4
+      // Step 7: Process recording and create MP4
       recorder.onstop = async () => {
         if (audioContext) {
           try {
@@ -360,15 +405,15 @@ function VideoGenerator() {
         }
 
         const webmBlob = new Blob(chunks, { type: "video/webm" })
+        console.log(`🎬 Recording complete: ${webmBlob.size} bytes`)
 
-        setProgress(80)
-        setProgressMessage("Uploading for final processing...")
+        setProgress(85)
 
-        // Upload WebM using FormData
+        // Upload WebM for processing
         const formData = new FormData()
-        formData.append("file", webmBlob, "video.webm")
+        formData.append("file", webmBlob, "snapsold-video.webm")
 
-        const webmUploadResponse = await fetch("/api/upload-image", {
+        const webmUploadResponse = await fetch("/api/upload-video", {
           method: "POST",
           body: formData,
         })
@@ -379,8 +424,9 @@ function VideoGenerator() {
 
         const { url: webmUrl } = await webmUploadResponse.json()
 
-        setProgress(90)
-        setProgressMessage("Converting to MP4...")
+        setProgress(95)
+
+        // Process to MP4
         const mp4Response = await fetch("/api/process-video", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -388,25 +434,27 @@ function VideoGenerator() {
         })
 
         if (!mp4Response.ok) {
-          throw new Error("Failed to process video")
+          throw new Error("Failed to process video to MP4")
         }
 
         const { mp4Url } = await mp4Response.json()
-        if (!mp4Url) throw new Error("MP4 conversion failed.")
+        if (!mp4Url) throw new Error("MP4 processing failed.")
+
+        console.log("✅ Video generation complete!")
 
         setVideoUrl(mp4Url)
-        triggerDownload(mp4Url, "snapsold-video.mp4")
         setProgress(100)
-        setProgressMessage("Video generated successfully!")
         setIsVideoGenerated(true)
         setIsGenerating(false)
+
+        // Auto-download the video
+        triggerDownload(mp4Url, "snapsold-property-video.mp4")
       }
     } catch (err) {
       console.error("Video generation error:", err)
       setError(err instanceof Error ? err.message : "Video generation failed.")
       setIsGenerating(false)
       setProgress(0)
-      setProgressMessage("")
     }
   }
 
@@ -414,11 +462,12 @@ function VideoGenerator() {
     setVideoUrl(null)
     setIsVideoGenerated(false)
     setProgress(0)
-    setProgressMessage("")
     setError(null)
   }
 
   const successfulUploadCount = uploadedImages.filter((i) => i.status === "success").length
+  const uploadingCount = uploadedImages.filter((i) => i.status === "compressing" || i.status === "uploading").length
+  const failedCount = uploadedImages.filter((i) => i.status === "error").length
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
@@ -444,7 +493,7 @@ function VideoGenerator() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   disabled={isGenerating}
-                  placeholder="123 Main St, City, State 12345"
+                  placeholder="38261 Main St, City, State 12345"
                 />
               </div>
               <div>
@@ -481,7 +530,7 @@ function VideoGenerator() {
                   value={bathrooms}
                   onChange={(e) => setBathrooms(e.target.value)}
                   disabled={isGenerating}
-                  placeholder="2.5"
+                  placeholder="1.5"
                 />
               </div>
               <div>
@@ -492,7 +541,7 @@ function VideoGenerator() {
                   value={sqft}
                   onChange={(e) => setSqft(e.target.value)}
                   disabled={isGenerating}
-                  placeholder="1800"
+                  placeholder="2703"
                 />
               </div>
             </div>
@@ -504,14 +553,22 @@ function VideoGenerator() {
                 value={propertyDescription}
                 onChange={(e) => setPropertyDescription(e.target.value)}
                 disabled={isGenerating}
-                placeholder="Describe special features like detached shop, corner lot, pool, etc..."
+                placeholder="Describe special features like detached shop, corner lot, pool, upgraded kitchen, etc..."
                 rows={3}
               />
             </div>
 
             {/* Image Upload Section */}
             <div className="space-y-3">
-              <Label>Upload Property Photos (up to {MAX_IMAGES})</Label>
+              <Label>
+                Upload Property Photos (up to {MAX_IMAGES})
+                {uploadedImages.length > 0 && (
+                  <span className="ml-2 text-sm text-gray-500">
+                    {successfulUploadCount} uploaded, {uploadingCount} uploading, {failedCount} failed
+                  </span>
+                )}
+              </Label>
+
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
                 <UploadCloud className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                 <label
@@ -529,13 +586,11 @@ function VideoGenerator() {
                     disabled={isGenerating || uploadedImages.length >= MAX_IMAGES}
                   />
                 </label>
-                <p className="text-sm text-gray-500 mt-2">
-                  JPG, PNG, WebP up to 10MB each • Auto-compressed for optimal upload
-                </p>
+                <p className="text-sm text-gray-500 mt-2">JPG, PNG, WebP • Auto-compressed to under 1MB each</p>
               </div>
 
               {uploadedImages.length > 0 && (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-64 overflow-y-auto">
                   {uploadedImages.map((img) => (
                     <div key={img.id} className="relative aspect-square group">
                       <img
@@ -616,11 +671,11 @@ function VideoGenerator() {
               />
             </div>
 
-            {/* Progress Bar */}
+            {/* Progress Bar - Only show percentage, no text */}
             {isGenerating && (
               <div className="space-y-2">
-                <Progress value={progress} className="w-full" />
-                <p className="text-center text-sm text-gray-600">{progressMessage}</p>
+                <Progress value={progress} className="w-full h-3" />
+                <p className="text-center text-sm text-gray-600">{Math.round(progress)}%</p>
               </div>
             )}
 
@@ -640,7 +695,7 @@ function VideoGenerator() {
               </div>
             )}
 
-            {/* Generate Video Button */}
+            {/* Generate/Download Video Button */}
             {!isVideoGenerated ? (
               <Button
                 onClick={generateVideo}
@@ -662,24 +717,16 @@ function VideoGenerator() {
               </Button>
             ) : (
               <div className="text-center space-y-4">
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="font-medium text-green-800">✅ Video generated and downloaded successfully!</p>
-                  <p className="text-sm text-green-600 mt-1">
-                    MP4 format • 1080x1920 • Rachel's voice • Feature captions
-                  </p>
-                </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <Button
-                    onClick={() => videoUrl && triggerDownload(videoUrl, "snapsold-video.mp4")}
+                    onClick={() => videoUrl && triggerDownload(videoUrl, "snapsold-property-video.mp4")}
                     disabled={!videoUrl}
-                    variant="outline"
-                    className="w-full"
+                    className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
                   >
                     <Download className="mr-2 h-4 w-4" />
-                    Download Again
+                    Download Video
                   </Button>
-                  <Button onClick={resetForNewVideo} className="w-full">
+                  <Button onClick={resetForNewVideo} variant="outline" className="w-full bg-transparent">
                     <RotateCcw className="mr-2 h-4 w-4" />
                     Generate Another
                   </Button>
