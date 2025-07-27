@@ -3,37 +3,36 @@ import { type NextRequest, NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 30
 
-// Convert numbers to natural speech for addresses
-function formatAddressNumber(num: string): string {
-  // For addresses like "38261", break into groups: "thirty-eight two sixty-one"
+// Helper function to convert numbers to natural speech
+function formatNumberForSpeech(num: string): string {
+  const number = Number.parseInt(num)
+
+  // Handle addresses like "38261" -> "thirty-eight two sixty-one"
   if (num.length === 5) {
-    const first = Number.parseInt(num.substring(0, 2))
-    const second = Number.parseInt(num.substring(2, 3))
-    const third = Number.parseInt(num.substring(3, 5))
-
-    const firstWords = numberToWords(first)
-    const secondWords = numberToWords(second)
-    const thirdWords = numberToWords(third)
-
-    return `${firstWords} ${secondWords} ${thirdWords}`
-  } else if (num.length === 4) {
-    const first = Number.parseInt(num.substring(0, 2))
-    const second = Number.parseInt(num.substring(2, 4))
-    return `${numberToWords(first)} ${numberToWords(second)}`
-  } else if (num.length === 3) {
-    const first = Number.parseInt(num.substring(0, 1))
-    const second = Number.parseInt(num.substring(1, 3))
-    return `${numberToWords(first)} ${numberToWords(second)}`
-  } else {
-    return numberToWords(Number.parseInt(num))
+    const first = Math.floor(number / 1000)
+    const last = number % 1000
+    if (first < 100 && last < 1000) {
+      return `${numberToWords(first)} ${numberToWords(last)}`
+    }
   }
+
+  // Handle regular numbers
+  if (number < 1000) {
+    return numberToWords(number)
+  } else if (number < 1000000) {
+    const thousands = Math.floor(number / 1000)
+    const remainder = number % 1000
+    if (remainder === 0) {
+      return `${numberToWords(thousands)} thousand`
+    } else {
+      return `${numberToWords(thousands)} thousand ${numberToWords(remainder)}`
+    }
+  }
+
+  return num // fallback
 }
 
-// Convert numbers to words
 function numberToWords(num: number): string {
-  if (num === 0) return "zero"
-  if (num < 0) return "negative " + numberToWords(-num)
-
   const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
   const teens = [
     "ten",
@@ -49,184 +48,84 @@ function numberToWords(num: number): string {
   ]
   const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 
-  function convertHundreds(n: number): string {
-    let result = ""
-
-    if (n >= 100) {
-      result += ones[Math.floor(n / 100)] + " hundred"
-      n %= 100
-      if (n > 0) result += " "
-    }
-
-    if (n >= 20) {
-      result += tens[Math.floor(n / 10)]
-      if (n % 10 > 0) result += "-" + ones[n % 10]
-    } else if (n >= 10) {
-      result += teens[n - 10]
-    } else if (n > 0) {
-      result += ones[n]
-    }
-
-    return result
+  if (num === 0) return "zero"
+  if (num < 10) return ones[num]
+  if (num < 20) return teens[num - 10]
+  if (num < 100) {
+    const ten = Math.floor(num / 10)
+    const one = num % 10
+    return tens[ten] + (one > 0 ? "-" + ones[one] : "")
   }
-
   if (num < 1000) {
-    return convertHundreds(num)
-  } else if (num < 1000000) {
-    const thousands = Math.floor(num / 1000)
-    const remainder = num % 1000
-    let result = convertHundreds(thousands) + " thousand"
-    if (remainder > 0) {
-      result += " " + convertHundreds(remainder)
-    }
-    return result
-  } else {
-    const millions = Math.floor(num / 1000000)
-    const remainder = num % 1000000
-    let result = convertHundreds(millions) + " million"
-    if (remainder > 0) {
-      if (remainder >= 1000) {
-        const thousands = Math.floor(remainder / 1000)
-        result += " " + convertHundreds(thousands) + " thousand"
-        const finalRemainder = remainder % 1000
-        if (finalRemainder > 0) {
-          result += " " + convertHundreds(finalRemainder)
-        }
-      } else {
-        result += " " + convertHundreds(remainder)
-      }
-    }
-    return result
+    const hundred = Math.floor(num / 100)
+    const remainder = num % 100
+    return ones[hundred] + " hundred" + (remainder > 0 ? " " + numberToWords(remainder) : "")
   }
-}
 
-// Format price for natural speech
-function formatPrice(price: number): string {
-  return numberToWords(price) + " dollars"
-}
-
-// Format bathrooms with half-bath support
-function formatBathrooms(bathrooms: number): string {
-  if (bathrooms === Math.floor(bathrooms)) {
-    const word = bathrooms === 1 ? "bathroom" : "bathrooms"
-    return numberToWords(bathrooms) + " " + word
-  } else {
-    const whole = Math.floor(bathrooms)
-    const word = bathrooms <= 1.5 ? "bathroom" : "bathrooms"
-    if (whole === 0) {
-      return "one half bathroom"
-    } else {
-      return numberToWords(whole) + " and a half " + word
-    }
-  }
-}
-
-// Format bedrooms
-function formatBedrooms(bedrooms: number): string {
-  const word = bedrooms === 1 ? "bedroom" : "bedrooms"
-  return numberToWords(bedrooms) + " " + word
-}
-
-// Format square footage
-function formatSquareFeet(sqft: number): string {
-  return numberToWords(sqft) + " square feet"
-}
-
-// Clean address for speech
-function cleanAddressForSpeech(address: string): string {
-  // Remove ZIP codes and format address numbers properly
-  let cleanAddress = address.replace(/\b\d{5}(-\d{4})?\b/g, "")
-
-  // Format address numbers (like house numbers)
-  cleanAddress = cleanAddress.replace(/\b(\d{3,5})\b/g, (match) => {
-    return formatAddressNumber(match)
-  })
-
-  return cleanAddress.replace(/,\s*,/g, ",").replace(/,\s*$/g, "").trim()
+  return num.toString()
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { address, price, bedrooms, bathrooms, sqft, propertyDescription } = body
+    const { address, price, bedrooms, bathrooms, sqft, propertyDescription } = await request.json()
 
-    // Validate required fields
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
-      return NextResponse.json({ error: "Missing required property details" }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: "Missing required property details",
+        },
+        { status: 400 },
+      )
     }
 
-    // Convert inputs to numbers
-    const numPrice = Number(price)
-    const numBedrooms = Number(bedrooms)
-    const numBathrooms = Number(bathrooms)
-    const numSqft = Number(sqft)
+    // Clean address for speech (remove ZIP code)
+    const cleanAddress = address.replace(/\s+\d{5}(-\d{4})?$/, "")
 
-    // Validate numeric inputs
-    if (isNaN(numPrice) || isNaN(numBedrooms) || isNaN(numBathrooms) || isNaN(numSqft)) {
-      return NextResponse.json({ error: "Invalid numeric values" }, { status: 400 })
+    // Format numbers for natural speech
+    const addressForSpeech = cleanAddress.replace(/\d+/g, (match: string) => formatNumberForSpeech(match))
+    const priceForSpeech = `${formatNumberForSpeech(price)} dollars`
+    const bedroomsForSpeech = `${bedrooms} ${bedrooms === "1" ? "bedroom" : "bedrooms"}`
+    const bathroomsForSpeech = bathrooms.includes(".5")
+      ? `${bathrooms.replace(".5", " and a half")} bathrooms`
+      : `${bathrooms} ${bathrooms === "1" ? "bathroom" : "bathrooms"}`
+    const sqftForSpeech = `${formatNumberForSpeech(sqft)} square feet`
+
+    // Remove duplicate bedroom/bathroom info from description
+    let cleanDescription = propertyDescription || ""
+    cleanDescription = cleanDescription.replace(/\d+\s*(br|bed|bedroom|bedrooms?)/gi, "")
+    cleanDescription = cleanDescription.replace(/\d+\.?\d*\s*(ba|bath|bathroom|bathrooms?)/gi, "")
+    cleanDescription = cleanDescription.replace(/\$?\d+k?/gi, "") // Remove price mentions
+    cleanDescription = cleanDescription.replace(/\s+/g, " ").trim()
+
+    // Generate clean, engaging script
+    let script = `Check out this incredible property at ${addressForSpeech}! `
+    script += `This stunning home features ${bedroomsForSpeech}, ${bathroomsForSpeech}, and ${sqftForSpeech} of living space. `
+
+    if (cleanDescription) {
+      script += `${cleanDescription} `
     }
 
-    // Clean address for speech
-    const speechAddress = cleanAddressForSpeech(address)
+    script += `And the best part? It's priced at just ${priceForSpeech}. `
+    script += `This won't last long in today's market. Schedule your showing today!`
 
-    // Convert to natural speech
-    const priceText = formatPrice(numPrice)
-    const bedroomsText = formatBedrooms(numBedrooms)
-    const bathroomsText = formatBathrooms(numBathrooms)
-    const sqftText = formatSquareFeet(numSqft)
-
-    // Build clean, engaging script without duplication
-    let script = ""
-
-    // Opening hook
-    script += `Welcome to this stunning property at ${speechAddress}! `
-
-    // Core features - mention once only
-    script += `This beautiful home features ${bedroomsText} and ${bathroomsText}, `
-    script += `with ${sqftText} of gorgeous living space. `
-
-    // Integrate user description smoothly without duplicating basic info
-    if (propertyDescription && propertyDescription.trim()) {
-      let cleanDescription = propertyDescription.trim()
-
-      // Remove redundant bedroom/bathroom/sqft info to avoid duplication
-      cleanDescription = cleanDescription
-        .replace(/\d+\s*(bed|bedroom|br)\w*/gi, "")
-        .replace(/\d+\.?\d*\s*(bath|bathroom|ba)\w*/gi, "")
-        .replace(/\d+\s*(sq\s*ft|square\s*feet)\w*/gi, "")
-        .replace(/\$[\d,]+/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-
-      if (cleanDescription) {
-        // Add natural transition and integrate smoothly
-        script += `You'll love the ${cleanDescription.toLowerCase()}. `
-      }
-    }
-
-    // Price reveal
-    script += `And the best part? It's priced at just ${priceText}! `
-
-    // Strong call to action
-    script += `This incredible home won't last long in today's market. Message me today to schedule your private showing!`
-
-    // Clean up formatting and fix spacing issues
-    const finalScript = script
-      .replace(/\s+/g, " ") // Fix multiple spaces
-      .replace(/\.\s*\./g, ".") // Fix double periods
-      .replace(/!\s*!/g, "!") // Fix double exclamations
-      .replace(/,\s*,/g, ",") // Fix double commas
-      .trim()
-
-    console.log(`📝 Generated script: ${finalScript.length} characters`)
+    // Clean up any formatting issues
+    script = script.replace(/\s+/g, " ") // Remove extra spaces
+    script = script.replace(/\.\s*\./g, ".") // Remove double periods
+    script = script.trim()
 
     return NextResponse.json({
-      script: finalScript,
-      wordCount: finalScript.split(" ").length,
-      estimatedDuration: Math.round((finalScript.split(" ").length / 150) * 60),
+      success: true,
+      script: script,
     })
   } catch (error) {
     console.error("Script generation error:", error)
-    return NextResponse.json({ error: "Failed to generate script. Please try again." }, { status: 500 })
+
+    return NextResponse.json(
+      {
+        error: "Failed to generate script. Please try again.",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }

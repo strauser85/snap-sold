@@ -9,7 +9,12 @@ export async function POST(request: NextRequest) {
     const { webmUrl } = await request.json()
 
     if (!webmUrl) {
-      return NextResponse.json({ error: "No video URL provided" }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: "No video URL provided",
+        },
+        { status: 400 },
+      )
     }
 
     console.log("🎬 Processing video for MP4 export...")
@@ -47,16 +52,23 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Video processing error:", error)
 
-    // Handle specific error types
+    // Always return valid JSON
     if (error instanceof Error) {
-      if (error.message.includes("413") || error.message.includes("too large")) {
+      if (error.message.includes("413") || error.message.includes("too large") || error.message.includes("Too Large")) {
         return NextResponse.json(
-          { error: "Video file too large for processing. Please try a shorter video." },
+          {
+            error: "Video file too large for processing. Please try a shorter video.",
+          },
           { status: 413 },
         )
       }
       if (error.message.includes("timeout")) {
-        return NextResponse.json({ error: "Video processing timeout. Please try again." }, { status: 408 })
+        return NextResponse.json(
+          {
+            error: "Video processing timeout. Please try again.",
+          },
+          { status: 408 },
+        )
       }
     }
 

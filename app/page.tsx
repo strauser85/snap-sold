@@ -28,6 +28,17 @@ interface Caption {
 
 const MAX_IMAGES = 30
 
+// Safe JSON parser with error handling
+async function safeJsonParse(response: Response) {
+  try {
+    const text = await response.text()
+    return JSON.parse(text)
+  } catch (error) {
+    console.error("JSON parse error:", error)
+    return { error: "Invalid server response" }
+  }
+}
+
 function VideoGenerator() {
   const [address, setAddress] = useState("")
   const [price, setPrice] = useState("")
@@ -81,7 +92,7 @@ function VideoGenerator() {
 
         console.log(`📦 Compressed ${image.file.name}: ${image.file.size} → ${compressedFile.size} bytes`)
 
-        // Step 2: Upload compressed image
+        // Step 2: Upload compressed image with safe JSON parsing
         updateImageStatus(image.id, "uploading")
         const formData = new FormData()
         formData.append("file", compressedFile)
@@ -91,8 +102,12 @@ function VideoGenerator() {
           body: formData,
         })
 
-        const result = await response.json()
+        const result = await safeJsonParse(response)
+
         if (!response.ok || !result.success) {
+          if (result.error === "Invalid server response") {
+            throw new Error("Upload failed: Invalid server response.")
+          }
           throw new Error(result.error || "Upload failed")
         }
 
@@ -139,8 +154,12 @@ function VideoGenerator() {
           body: formData,
         })
 
-        const result = await response.json()
+        const result = await safeJsonParse(response)
+
         if (!response.ok || !result.success) {
+          if (result.error === "Invalid server response") {
+            throw new Error("Upload failed: Invalid server response.")
+          }
           throw new Error(result.error || "Upload failed")
         }
 
@@ -176,9 +195,12 @@ function VideoGenerator() {
         }),
       })
 
-      const result = await response.json()
+      const result = await safeJsonParse(response)
 
       if (!response.ok) {
+        if (result.error === "Invalid server response") {
+          throw new Error("Script generation failed: Invalid server response.")
+        }
         throw new Error(result.error || "Script generation failed")
       }
 
@@ -294,7 +316,10 @@ function VideoGenerator() {
       })
 
       if (!audioResp.ok) {
-        const errorData = await audioResp.json()
+        const errorData = await safeJsonParse(audioResp)
+        if (errorData.error === "Invalid server response") {
+          throw new Error("Audio generation failed: Invalid server response.")
+        }
         throw new Error(errorData.error || "Failed to generate Rachel's voiceover")
       }
 
@@ -414,13 +439,13 @@ function VideoGenerator() {
 
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight)
 
-        // Draw bright yellow captions with black shadow for contrast
+        // Draw bright yellow captions with dark shadow for contrast
         captions.forEach((cap) => {
           if (elapsed >= cap.startTime && elapsed <= cap.endTime) {
             ctx.font = "bold 90px Arial"
             ctx.textAlign = "center"
 
-            // Black shadow for contrast
+            // Dark shadow for contrast
             ctx.fillStyle = "#000000"
             ctx.fillText(cap.text, canvas.width / 2 + 4, canvas.height - 296)
 
@@ -450,7 +475,7 @@ function VideoGenerator() {
           setProgress(85)
           setProgressMessage("Uploading video for processing...")
 
-          // Upload WebM for MP4 conversion
+          // Upload WebM for MP4 conversion with safe JSON parsing
           const formData = new FormData()
           formData.append("file", webmBlob, "snapsold-video.webm")
 
@@ -459,29 +484,37 @@ function VideoGenerator() {
             body: formData,
           })
 
+          const uploadResult = await safeJsonParse(webmUploadResponse)
+
           if (!webmUploadResponse.ok) {
-            const uploadError = await webmUploadResponse.json()
-            throw new Error(uploadError.error || "Failed to upload video for processing")
+            if (uploadResult.error === "Invalid server response") {
+              throw new Error("Video upload failed: Invalid server response.")
+            }
+            throw new Error(uploadResult.error || "Failed to upload video for processing")
           }
 
-          const { url: webmUrl } = await webmUploadResponse.json()
+          const { url: webmUrl } = uploadResult
 
           setProgress(95)
           setProgressMessage("Converting to MP4...")
 
-          // Convert to MP4
+          // Convert to MP4 with safe JSON parsing
           const mp4Response = await fetch("/api/process-video", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ webmUrl }),
           })
 
+          const processResult = await safeJsonParse(mp4Response)
+
           if (!mp4Response.ok) {
-            const processError = await mp4Response.json()
-            throw new Error(processError.error || "Failed to process video to MP4")
+            if (processResult.error === "Invalid server response") {
+              throw new Error("Video processing failed: Invalid server response.")
+            }
+            throw new Error(processResult.error || "Failed to process video to MP4")
           }
 
-          const { mp4Url } = await mp4Response.json()
+          const { mp4Url } = processResult
           if (!mp4Url) throw new Error("MP4 processing failed.")
 
           console.log("✅ Video generation complete!")

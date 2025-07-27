@@ -4,6 +4,15 @@ import { type NextRequest, NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 30
 
+// Increase body size limit for image uploads
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "50mb",
+    },
+  },
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -16,12 +25,22 @@ export async function POST(request: NextRequest) {
     // Validate file type
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
     if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json({ error: "Invalid file type. Please upload JPG, PNG, or WebP images." }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: "Invalid file type. Please upload JPG, PNG, or WebP images.",
+        },
+        { status: 400 },
+      )
     }
 
-    // Check file size (20MB max before compression)
-    if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: "File too large. Please use images under 20MB." }, { status: 413 })
+    // Check file size (50MB max before compression)
+    if (file.size > 50 * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          error: "File too large. Please use images under 50MB.",
+        },
+        { status: 413 },
+      )
     }
 
     // Generate unique filename
@@ -51,22 +70,31 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Upload error:", error)
 
-    // Handle specific error types
+    // Always return valid JSON, even for errors
     if (error instanceof Error) {
-      if (error.message.includes("413") || error.message.includes("too large")) {
+      if (error.message.includes("413") || error.message.includes("too large") || error.message.includes("Too Large")) {
         return NextResponse.json(
-          { error: "File too large. Please compress your image or use a smaller file." },
+          {
+            error: "File too large. Please compress your image or use a smaller file.",
+          },
           { status: 413 },
         )
       }
       if (error.message.includes("content-length")) {
         return NextResponse.json(
-          { error: "Upload failed due to content-length issue. Please try again." },
+          {
+            error: "Upload failed due to content-length issue. Please try again.",
+          },
           { status: 400 },
         )
       }
       if (error.message.includes("timeout")) {
-        return NextResponse.json({ error: "Upload timeout. Please try again with a smaller file." }, { status: 408 })
+        return NextResponse.json(
+          {
+            error: "Upload timeout. Please try again with a smaller file.",
+          },
+          { status: 408 },
+        )
       }
     }
 
