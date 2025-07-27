@@ -38,6 +38,7 @@ function VideoGenerator() {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [generatedScript, setGeneratedScript] = useState("")
   const [isGeneratingScript, setIsGeneratingScript] = useState(false)
+  const [scriptError, setScriptError] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -64,13 +65,13 @@ function VideoGenerator() {
 
     setUploadedImages((prev) => [...prev, ...newImages])
 
-    // Process images sequentially to avoid overwhelming the server
+    // Process images sequentially
     for (const image of newImages) {
       try {
         // Step 1: Compress image to prevent 413 errors
         updateImageStatus(image.id, "compressing")
         const compressedFile = await imageCompression(image.file, {
-          maxSizeMB: 1, // Compress to under 1MB
+          maxSizeMB: 2, // Compress to under 2MB
           maxWidthOrHeight: 1920,
           useWebWorker: true,
           fileType: "image/jpeg",
@@ -79,7 +80,7 @@ function VideoGenerator() {
 
         console.log(`📦 Compressed ${image.file.name}: ${image.file.size} → ${compressedFile.size} bytes`)
 
-        // Step 2: Upload compressed image using FormData
+        // Step 2: Upload compressed image
         updateImageStatus(image.id, "uploading")
         const formData = new FormData()
         formData.append("file", compressedFile)
@@ -101,7 +102,7 @@ function VideoGenerator() {
         updateImageStatus(image.id, "error", { error: errorMessage })
       }
     }
-    e.target.value = "" // Allow re-uploading
+    e.target.value = ""
   }
 
   const removeImage = (id: string) => {
@@ -116,12 +117,13 @@ function VideoGenerator() {
 
   const generateAIScript = async () => {
     if (!address || !price || !bedrooms || !bathrooms || !sqft) {
-      setError("Please fill in all property details first.")
+      setScriptError("Please fill in all property details first.")
       return
     }
 
     setIsGeneratingScript(true)
-    setError(null)
+    setScriptError(null)
+    setGeneratedScript("")
 
     try {
       const response = await fetch("/api/generate-script", {
@@ -137,14 +139,16 @@ function VideoGenerator() {
         }),
       })
 
+      const result = await response.json()
+
       if (!response.ok) {
-        throw new Error("Script generation failed")
+        throw new Error(result.error || "Script generation failed")
       }
 
-      const { script } = await response.json()
-      setGeneratedScript(script)
+      setGeneratedScript(result.script)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate script.")
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate script"
+      setScriptError(errorMessage)
     } finally {
       setIsGeneratingScript(false)
     }
@@ -153,7 +157,7 @@ function VideoGenerator() {
   const createPropertyCaptions = (duration: number): Caption[] => {
     const caps: Caption[] = []
 
-    // Only show key property features as captions - NOT full transcript
+    // Only key property features - NOT full transcript
     if (bedrooms) {
       caps.push({
         text: `${bedrooms} ${Number(bedrooms) === 1 ? "BEDROOM" : "BEDROOMS"}`,
@@ -189,7 +193,7 @@ function VideoGenerator() {
     // Extract special features from description
     if (propertyDescription) {
       const features = propertyDescription.match(
-        /detached shop|corner lot|pool|garage|fireplace|deck|patio|yard|upgraded|renovated/gi,
+        /pool|garage|fireplace|deck|patio|yard|upgraded|renovated|corner lot|detached/gi,
       )
       if (features && features.length > 0) {
         caps.push({
@@ -200,12 +204,12 @@ function VideoGenerator() {
       }
     }
 
-    // Distribute captions evenly across video duration, timed with image transitions
+    // Distribute captions evenly across video duration
     const timePerCaption = duration / Math.max(caps.length, 1)
     return caps.map((cap, i) => ({
       ...cap,
-      startTime: i * timePerCaption + 1, // Start after 1 second
-      endTime: (i + 1) * timePerCaption, // Show for full duration
+      startTime: i * timePerCaption + 1,
+      endTime: (i + 1) * timePerCaption,
     }))
   }
 
@@ -241,7 +245,7 @@ function VideoGenerator() {
     setProgress(0)
 
     try {
-      // Step 1: Generate audio with LOCKED Rachel voice
+      // Step 1: Generate Rachel's voiceover
       setProgress(15)
       const audioResp = await fetch("/api/generate-audio", {
         method: "POST",
@@ -260,11 +264,11 @@ function VideoGenerator() {
 
       console.log(`🎤 Rachel voiceover generated: ${duration}s duration`)
 
-      // Step 2: Create property feature captions (not full transcript)
+      // Step 2: Create property feature captions
       setProgress(25)
       const captions = createPropertyCaptions(duration)
 
-      // Step 3: Load images with error handling
+      // Step 3: Load images
       setProgress(35)
       const imgs = await Promise.all(
         successfulUploads.map(
@@ -286,7 +290,7 @@ function VideoGenerator() {
 
       console.log(`📸 Loaded ${imgs.length} images for video`)
 
-      // Step 4: Setup canvas for 9:16 TikTok aspect ratio
+      // Step 4: Setup canvas for 9:16 aspect ratio
       setProgress(45)
       const canvas = canvasRef.current!
       const ctx = canvas.getContext("2d")!
@@ -295,10 +299,10 @@ function VideoGenerator() {
 
       const audio = audioRef.current!
       audio.src = audioUrl
-      audio.muted = true // Prevent autoplay during setup
+      audio.muted = true // Prevent audio preview during setup
 
-      // Step 5: Setup recording with audio sync
-      const stream = canvas.captureStream(30) // 30 FPS
+      // Step 5: Setup recording
+      const stream = canvas.captureStream(30)
       let audioContext: AudioContext | null = null
 
       try {
@@ -306,29 +310,25 @@ function VideoGenerator() {
         const source = audioContext.createMediaElementSource(audio)
         const dest = audioContext.createMediaStreamDestination()
         source.connect(dest)
-        source.connect(audioContext.destination) // Also connect to speakers
         dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track))
       } catch (audioError) {
         console.error("Audio context setup failed:", audioError)
-        // Continue without audio sync if it fails
       }
 
       const recorder = new MediaRecorder(stream, {
         mimeType: "video/webm;codecs=vp9,opus",
-        videoBitsPerSecond: 3000000, // 3 Mbps for good quality
+        videoBitsPerSecond: 3000000,
       })
       const chunks: Blob[] = []
       recorder.ondataavailable = (e) => chunks.push(e.data)
 
       recorder.start()
-
-      // Start audio playback (unmuted for recording)
-      audio.muted = false
+      audio.muted = false // Unmute for recording only
       await audio.play()
 
       console.log("🎬 Recording started...")
 
-      // Step 6: Render video frames with property captions
+      // Step 6: Render video frames with bright yellow captions
       setProgress(55)
       const timePerImage = duration / imgs.length
       let frameCount = 0
@@ -344,24 +344,22 @@ function VideoGenerator() {
         const currentImageIndex = Math.min(Math.floor(elapsed / timePerImage), imgs.length - 1)
         const img = imgs[currentImageIndex]
 
-        // Clear canvas with black background
+        // Clear canvas
         ctx.fillStyle = "#000000"
         ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-        // Draw image with proper aspect ratio (fill canvas)
+        // Draw image with proper aspect ratio
         const imgAspect = img.width / img.height
         const canvasAspect = canvas.width / canvas.height
 
         let drawWidth, drawHeight, drawX, drawY
 
         if (imgAspect > canvasAspect) {
-          // Image is wider - fit height and crop sides
           drawHeight = canvas.height
           drawWidth = drawHeight * imgAspect
           drawX = (canvas.width - drawWidth) / 2
           drawY = 0
         } else {
-          // Image is taller - fit width and crop top/bottom
           drawWidth = canvas.width
           drawHeight = drawWidth / imgAspect
           drawX = 0
@@ -370,23 +368,22 @@ function VideoGenerator() {
 
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight)
 
-        // Draw property feature captions (bright yellow, bold, large)
+        // Draw bright yellow captions with shadow
         captions.forEach((cap) => {
           if (elapsed >= cap.startTime && elapsed <= cap.endTime) {
-            // Large, bold, bright yellow text
             ctx.font = "bold 90px Arial"
             ctx.textAlign = "center"
-            ctx.fillStyle = "#FFFF00" // Bright yellow
-            ctx.strokeStyle = "#000000" // Black outline
-            ctx.lineWidth = 6
 
-            const y = canvas.height - 300 // Lower third positioning
-            ctx.strokeText(cap.text, canvas.width / 2, y)
-            ctx.fillText(cap.text, canvas.width / 2, y)
+            // Shadow for readability
+            ctx.fillStyle = "#000000"
+            ctx.fillText(cap.text, canvas.width / 2 + 4, canvas.height - 296)
+
+            // Bright yellow text
+            ctx.fillStyle = "#FFFF00"
+            ctx.fillText(cap.text, canvas.width / 2, canvas.height - 300)
           }
         })
 
-        // Update progress
         const recordingProgress = 55 + (frameCount / totalFrames) * 25
         setProgress(Math.min(recordingProgress, 80))
         frameCount++
@@ -394,7 +391,7 @@ function VideoGenerator() {
       }
       animate()
 
-      // Step 7: Process recording and create MP4
+      // Step 7: Process recording to MP4
       recorder.onstop = async () => {
         if (audioContext) {
           try {
@@ -409,11 +406,11 @@ function VideoGenerator() {
 
         setProgress(85)
 
-        // Upload WebM for processing
+        // Upload WebM for MP4 conversion
         const formData = new FormData()
         formData.append("file", webmBlob, "snapsold-video.webm")
 
-        const webmUploadResponse = await fetch("/api/upload-video", {
+        const webmUploadResponse = await fetch("/api/upload-image", {
           method: "POST",
           body: formData,
         })
@@ -426,7 +423,7 @@ function VideoGenerator() {
 
         setProgress(95)
 
-        // Process to MP4
+        // Convert to MP4
         const mp4Response = await fetch("/api/process-video", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -447,7 +444,7 @@ function VideoGenerator() {
         setIsVideoGenerated(true)
         setIsGenerating(false)
 
-        // Auto-download the video
+        // Auto-download MP4
         triggerDownload(mp4Url, "snapsold-property-video.mp4")
       }
     } catch (err) {
@@ -553,12 +550,12 @@ function VideoGenerator() {
                 value={propertyDescription}
                 onChange={(e) => setPropertyDescription(e.target.value)}
                 disabled={isGenerating}
-                placeholder="Describe special features like detached shop, corner lot, pool, upgraded kitchen, etc..."
+                placeholder="Describe special features like pool, garage, upgraded kitchen, corner lot, etc..."
                 rows={3}
               />
             </div>
 
-            {/* Image Upload Section */}
+            {/* Image Upload Section with Thumbnails */}
             <div className="space-y-3">
               <Label>
                 Upload Property Photos (up to {MAX_IMAGES})
@@ -586,11 +583,12 @@ function VideoGenerator() {
                     disabled={isGenerating || uploadedImages.length >= MAX_IMAGES}
                   />
                 </label>
-                <p className="text-sm text-gray-500 mt-2">JPG, PNG, WebP • Auto-compressed to under 1MB each</p>
+                <p className="text-sm text-gray-500 mt-2">JPG, PNG, WebP • Auto-compressed for optimal upload</p>
               </div>
 
+              {/* Thumbnail Previews */}
               {uploadedImages.length > 0 && (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-64 overflow-y-auto">
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3 max-h-64 overflow-y-auto">
                   {uploadedImages.map((img) => (
                     <div key={img.id} className="relative aspect-square group">
                       <img
@@ -603,20 +601,20 @@ function VideoGenerator() {
                       <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
                         {img.status === "compressing" && (
                           <div className="text-center">
-                            <Loader2 className="h-6 w-6 animate-spin text-white mx-auto" />
-                            <p className="text-xs text-white mt-1">Compressing...</p>
+                            <Loader2 className="h-4 w-4 animate-spin text-white mx-auto" />
+                            <p className="text-xs text-white mt-1">Compressing</p>
                           </div>
                         )}
                         {img.status === "uploading" && (
                           <div className="text-center">
-                            <Loader2 className="h-6 w-6 animate-spin text-white mx-auto" />
-                            <p className="text-xs text-white mt-1">Uploading...</p>
+                            <Loader2 className="h-4 w-4 animate-spin text-white mx-auto" />
+                            <p className="text-xs text-white mt-1">Uploading</p>
                           </div>
                         )}
-                        {img.status === "success" && <CheckCircle className="h-8 w-8 text-green-400" />}
+                        {img.status === "success" && <CheckCircle className="h-6 w-6 text-green-400" />}
                         {img.status === "error" && (
                           <div className="text-center">
-                            <AlertCircle className="h-8 w-8 text-red-400 mx-auto" />
+                            <AlertCircle className="h-6 w-6 text-red-400 mx-auto" />
                             <p className="text-xs text-white mt-1" title={img.error}>
                               Failed
                             </p>
@@ -627,10 +625,10 @@ function VideoGenerator() {
                       {/* Remove Button */}
                       <button
                         onClick={() => removeImage(img.id)}
-                        className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute -top-1 -right-1 bg-red-500 hover:bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                         disabled={isGenerating}
                       >
-                        <XCircle className="h-4 w-4 text-white" />
+                        <XCircle className="h-3 w-3 text-white" />
                       </button>
                     </div>
                   ))}
@@ -638,10 +636,10 @@ function VideoGenerator() {
               )}
             </div>
 
-            {/* Script Generation */}
+            {/* Script Generation with Preview */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label htmlFor="script">AI-Generated Script</Label>
+                <Label htmlFor="script">AI-Generated Script (Preview & Edit)</Label>
                 <Button
                   onClick={generateAIScript}
                   disabled={isGeneratingScript || isGenerating}
@@ -661,17 +659,34 @@ function VideoGenerator() {
                   )}
                 </Button>
               </div>
+
+              {/* Script Error Display */}
+              {scriptError && (
+                <div className="flex items-center text-sm text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">
+                  <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span className="flex-1">{scriptError}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setScriptError(null)}
+                    className="ml-2 h-6 w-6 hover:bg-red-100"
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+
               <Textarea
                 id="script"
                 value={generatedScript}
                 onChange={(e) => setGeneratedScript(e.target.value)}
-                rows={4}
+                rows={5}
                 disabled={isGenerating}
-                placeholder="Click 'Generate Script' to create an engaging TikTok-style script with natural number pronunciation..."
+                placeholder="Click 'Generate Script' to create an engaging script with natural number pronunciation. You can preview and edit it before generating the video."
               />
             </div>
 
-            {/* Progress Bar - Only show percentage, no text */}
+            {/* Progress Bar - Only show percentage */}
             {isGenerating && (
               <div className="space-y-2">
                 <Progress value={progress} className="w-full h-3" />
@@ -700,7 +715,7 @@ function VideoGenerator() {
               <Button
                 onClick={generateVideo}
                 disabled={isGenerating || successfulUploadCount === 0 || !generatedScript}
-                className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg"
+                className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 shadow-lg disabled:opacity-50"
                 size="lg"
               >
                 {isGenerating ? (
@@ -724,7 +739,7 @@ function VideoGenerator() {
                     className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
                   >
                     <Download className="mr-2 h-4 w-4" />
-                    Download Video
+                    Download MP4
                   </Button>
                   <Button onClick={resetForNewVideo} variant="outline" className="w-full bg-transparent">
                     <RotateCcw className="mr-2 h-4 w-4" />

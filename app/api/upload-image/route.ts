@@ -14,43 +14,38 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "video/webm", "video/mp4"]
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
     if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json(
-        { error: "Invalid file type. Please upload JPG, PNG, WebP, or video files." },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: "Invalid file type. Please upload JPG, PNG, or WebP images." }, { status: 400 })
     }
 
-    // Validate file size - 100MB for videos, 10MB for images
-    const maxSize = file.type.startsWith("video/") ? 100 * 1024 * 1024 : 10 * 1024 * 1024
-    if (file.size > maxSize) {
-      const maxSizeMB = file.type.startsWith("video/") ? "100MB" : "10MB"
-      return NextResponse.json(
-        {
-          error: `File too large. Maximum size is ${maxSizeMB}.`,
-        },
-        { status: 413 },
-      )
+    // Check file size (10MB max before compression)
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "File too large. Please use images under 10MB." }, { status: 413 })
     }
 
     // Generate unique filename
     const timestamp = Date.now()
     const randomSuffix = Math.random().toString(36).substring(2, 8)
     const extension = file.name.split(".").pop() || "jpg"
-    const filename = `${file.type.startsWith("video/") ? "video" : "image"}-${timestamp}-${randomSuffix}.${extension}`
+    const filename = `image-${timestamp}-${randomSuffix}.${extension}`
 
-    // Upload to Vercel Blob - FormData automatically handles content-length
-    const blob = await put(filename, file, {
+    // Convert File to ArrayBuffer to get proper content-length
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = new Uint8Array(arrayBuffer)
+
+    // Upload to Vercel Blob with explicit content-length
+    const blob = await put(filename, buffer, {
       access: "public",
       addRandomSuffix: false,
+      contentType: file.type,
     })
 
     return NextResponse.json({
       success: true,
       url: blob.url,
       filename: filename,
-      size: file.size,
+      size: buffer.length,
       type: file.type,
     })
   } catch (error) {
@@ -60,18 +55,14 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error) {
       if (error.message.includes("413") || error.message.includes("too large")) {
         return NextResponse.json(
-          {
-            error: "File too large. Please compress your image or use a smaller file.",
-          },
+          { error: "File too large. Please compress your image or use a smaller file." },
           { status: 413 },
         )
       }
-      if (error.message.includes("timeout")) {
+      if (error.message.includes("content-length")) {
         return NextResponse.json(
-          {
-            error: "Upload timeout. Please try again with a smaller file.",
-          },
-          { status: 408 },
+          { error: "Upload failed due to content-length issue. Please try again." },
+          { status: 400 },
         )
       }
     }

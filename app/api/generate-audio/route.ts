@@ -18,10 +18,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
     }
 
-    // Clean script for better TTS pronunciation
-    const cleanScript = script.replace(/\s+/g, " ").trim()
-
-    console.log(`🎤 Generating Rachel voiceover for: "${cleanScript.substring(0, 100)}..."`)
+    console.log(`🎤 Generating Rachel voiceover...`)
 
     // Generate audio using LOCKED Rachel voice
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${RACHEL_VOICE_ID}`, {
@@ -32,12 +29,12 @@ export async function POST(request: NextRequest) {
         "xi-api-key": process.env.ELEVENLABS_API_KEY,
       },
       body: JSON.stringify({
-        text: cleanScript,
+        text: script,
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.6,
           similarity_boost: 0.8,
-          style: 0.3,
+          style: 0.2,
           use_speaker_boost: true,
         },
       }),
@@ -51,9 +48,7 @@ export async function POST(request: NextRequest) {
       if (response.status === 401) {
         errorMessage = "Invalid ElevenLabs API key"
       } else if (response.status === 429) {
-        errorMessage = "ElevenLabs rate limit exceeded. Please try again in a moment."
-      } else if (response.status === 402) {
-        errorMessage = "ElevenLabs quota exceeded. Please check your account."
+        errorMessage = "Rate limit exceeded. Please try again in a moment."
       }
 
       return NextResponse.json({ error: errorMessage }, { status: response.status })
@@ -61,11 +56,11 @@ export async function POST(request: NextRequest) {
 
     const audioBuffer = await response.arrayBuffer()
 
-    // Estimate duration (rough calculation: ~150 words per minute)
-    const wordCount = cleanScript.split(" ").length
+    // Estimate duration
+    const wordCount = script.split(" ").length
     const estimatedDuration = Math.max(10, Math.round((wordCount / 150) * 60))
 
-    console.log(`✅ Rachel voiceover generated: ${audioBuffer.byteLength} bytes, ~${estimatedDuration}s`)
+    console.log(`✅ Rachel voiceover generated: ${audioBuffer.byteLength} bytes`)
 
     return new NextResponse(audioBuffer, {
       headers: {
@@ -76,12 +71,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error("Audio generation error:", error)
-    return NextResponse.json(
-      {
-        error: "Rachel's voiceover generation failed. Please try again.",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: "Rachel's voiceover generation failed. Please try again." }, { status: 500 })
   }
 }

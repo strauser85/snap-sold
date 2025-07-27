@@ -1,25 +1,16 @@
 {
   "functions": {
     "app/api/upload-image/route.ts": {
-      "maxDuration": 30,
-      "memory": 512
-    },
-    "app/api/upload-video/route.ts": {
-      "maxDuration": 30,
-      "memory": 512
+      "maxDuration": 30
     },
     "app/api/generate-script/route.ts": {
-      "maxDuration": 30,
-      "memory": 256
+      "maxDuration": 30
     },
     "app/api/generate-audio/route.ts": {
-      "maxDuration": 60,
-      "memory": 512
+      "maxDuration": 60
     },
     "app/api/process-video/route.ts": {
-      "maxDuration": 60,
-      "memory": 1024
+      "maxDuration": 60
     }
-  },
-  "maxDuration": 60
+  }
 }

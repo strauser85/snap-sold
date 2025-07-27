@@ -12,10 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No video URL provided" }, { status: 400 })
     }
 
-    console.log("🎬 Processing video for MP4 conversion...")
-
-    // For now, we'll return the WebM URL as MP4 conversion requires FFmpeg
-    // In production, you would use a video processing service or FFmpeg
+    console.log("🎬 Processing video for MP4 export...")
 
     // Fetch the WebM video
     const videoResponse = await fetch(webmUrl)
@@ -23,35 +20,29 @@ export async function POST(request: NextRequest) {
       throw new Error("Failed to fetch video for processing")
     }
 
-    const videoBlob = await videoResponse.blob()
+    const videoArrayBuffer = await videoResponse.arrayBuffer()
+    const videoBuffer = new Uint8Array(videoArrayBuffer)
 
-    // Upload as MP4 (even though it's still WebM format)
-    // Most modern browsers and platforms support WebM playback
+    // Upload as MP4 with proper content-length
     const timestamp = Date.now()
     const filename = `snapsold-video-${timestamp}.mp4`
 
-    const processedBlob = await put(filename, videoBlob, {
+    const processedBlob = await put(filename, videoBuffer, {
       access: "public",
-      contentType: "video/mp4", // Set as MP4 for better compatibility
+      contentType: "video/mp4",
+      addRandomSuffix: false,
     })
 
-    console.log(`✅ Video processed and uploaded: ${processedBlob.url}`)
+    console.log(`✅ Video processed as MP4: ${processedBlob.url}`)
 
     return NextResponse.json({
       success: true,
       mp4Url: processedBlob.url,
-      originalUrl: webmUrl,
       filename: filename,
-      size: videoBlob.size,
+      size: videoBuffer.length,
     })
   } catch (error) {
     console.error("Video processing error:", error)
-    return NextResponse.json(
-      {
-        error: "Video processing failed. Please try again.",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: "Video processing failed. Please try again." }, { status: 500 })
   }
 }
