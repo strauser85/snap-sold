@@ -4,11 +4,11 @@ import { type NextRequest, NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 30
 
-// Increase body size limit for image uploads
+// Configure body parser for large files
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: "50mb",
+      sizeLimit: "100mb",
     },
   },
 }
@@ -26,20 +26,16 @@ export async function POST(request: NextRequest) {
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
-        {
-          error: "Invalid file type. Please upload JPG, PNG, or WebP images.",
-        },
-        { status: 400 },
+        { error: "Invalid file type. Please upload JPG, PNG, or WebP images." },
+        { status: 400 }
       )
     }
 
-    // Check file size (50MB max before compression)
-    if (file.size > 50 * 1024 * 1024) {
+    // Check file size (100MB max)
+    if (file.size > 100 * 1024 * 1024) {
       return NextResponse.json(
-        {
-          error: "File too large. Please use images under 50MB.",
-        },
-        { status: 413 },
+        { error: "File too large. Please use images under 100MB." },
+        { status: 413 }
       )
     }
 
@@ -49,11 +45,10 @@ export async function POST(request: NextRequest) {
     const extension = file.name.split(".").pop() || "jpg"
     const filename = `image-${timestamp}-${randomSuffix}.${extension}`
 
-    // Convert File to ArrayBuffer to ensure proper content-length header
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = new Uint8Array(arrayBuffer)
+    // Convert File to buffer with proper content-length
+    const buffer = Buffer.from(await file.arrayBuffer())
 
-    // Upload to Vercel Blob with explicit headers
+    // Upload to Vercel Blob with explicit content-length
     const blob = await put(filename, buffer, {
       access: "public",
       addRandomSuffix: false,
@@ -70,40 +65,25 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Upload error:", error)
 
-    // Always return valid JSON, even for errors
+    // Always return valid JSON
     if (error instanceof Error) {
-      if (error.message.includes("413") || error.message.includes("too large") || error.message.includes("Too Large")) {
+      if (error.message.includes("413") || error.message.includes("too large")) {
         return NextResponse.json(
-          {
-            error: "File too large. Please compress your image or use a smaller file.",
-          },
-          { status: 413 },
+          { error: "File too large. Please compress your image." },
+          { status: 413 }
         )
       }
       if (error.message.includes("content-length")) {
         return NextResponse.json(
-          {
-            error: "Upload failed due to content-length issue. Please try again.",
-          },
-          { status: 400 },
-        )
-      }
-      if (error.message.includes("timeout")) {
-        return NextResponse.json(
-          {
-            error: "Upload timeout. Please try again with a smaller file.",
-          },
-          { status: 408 },
+          { error: "Upload failed due to content-length issue." },
+          { status: 400 }
         )
       }
     }
 
     return NextResponse.json(
-      {
-        error: "Upload failed. Please try again.",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
+      { error: "Upload failed. Please try again." },
+      { status: 500 }
     )
   }
 }

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, type ChangeEvent } from "react"
-import { Loader2, AlertCircle, XCircle, Wand2, Play, Download, RotateCcw, CheckCircle, UploadCloud } from "lucide-react"
+import { Loader2, AlertCircle, XCircle, Wand2, Play, Download, RotateCcw, CheckCircle, UploadCloud } from 'lucide-react'
 import imageCompression from "browser-image-compression"
 
 import { Button } from "@/components/ui/button"
@@ -28,14 +28,18 @@ interface Caption {
 
 const MAX_IMAGES = 30
 
-// Safe JSON parser with error handling
-async function safeJsonParse(response: Response) {
+// Safe response handler with proper error handling
+async function handleResponse(response: Response) {
   try {
     const text = await response.text()
-    return JSON.parse(text)
-  } catch (error) {
-    console.error("JSON parse error:", error)
-    return { error: "Invalid server response" }
+    try {
+      return JSON.parse(text)
+    } catch {
+      // If JSON parsing fails, return error with text
+      return { error: text || "Upload failed. Try again." }
+    }
+  } catch {
+    return { error: "Upload failed. Try again." }
   }
 }
 
@@ -52,7 +56,6 @@ function VideoGenerator() {
   const [scriptError, setScriptError] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [progressMessage, setProgressMessage] = useState("")
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isVideoGenerated, setIsVideoGenerated] = useState(false)
@@ -77,22 +80,20 @@ function VideoGenerator() {
 
     setUploadedImages((prev) => [...prev, ...newImages])
 
-    // Process images sequentially to avoid overwhelming the server
+    // Process images sequentially
     for (const image of newImages) {
       try {
-        // Step 1: Compress image to prevent 413 errors and resize to 1280px max width
+        // Step 1: Compress and resize to max width 1280px
         updateImageStatus(image.id, "compressing")
         const compressedFile = await imageCompression(image.file, {
-          maxSizeMB: 3, // Compress to under 3MB
+          maxSizeMB: 5, // Compress to under 5MB
           maxWidthOrHeight: 1280, // Resize to 1280px max width
           useWebWorker: true,
           fileType: "image/jpeg",
           initialQuality: 0.8,
         })
 
-        console.log(`📦 Compressed ${image.file.name}: ${image.file.size} → ${compressedFile.size} bytes`)
-
-        // Step 2: Upload compressed image with safe JSON parsing
+        // Step 2: Upload compressed image
         updateImageStatus(image.id, "uploading")
         const formData = new FormData()
         formData.append("file", compressedFile)
@@ -102,23 +103,19 @@ function VideoGenerator() {
           body: formData,
         })
 
-        const result = await safeJsonParse(response)
+        const result = await handleResponse(response)
 
         if (!response.ok || !result.success) {
-          if (result.error === "Invalid server response") {
-            throw new Error("Upload failed: Invalid server response.")
-          }
           throw new Error(result.error || "Upload failed")
         }
 
         updateImageStatus(image.id, "success", { blobUrl: result.url })
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Upload failed"
-        console.error(`❌ Upload failed for ${image.file.name}:`, errorMessage)
         updateImageStatus(image.id, "error", { error: errorMessage })
       }
     }
-    e.target.value = "" // Allow re-uploading
+    e.target.value = ""
   }
 
   const removeImage = (id: string) => {
@@ -138,7 +135,7 @@ function VideoGenerator() {
       try {
         updateImageStatus(image.id, "compressing")
         const compressedFile = await imageCompression(image.file, {
-          maxSizeMB: 3,
+          maxSizeMB: 5,
           maxWidthOrHeight: 1280,
           useWebWorker: true,
           fileType: "image/jpeg",
@@ -154,12 +151,9 @@ function VideoGenerator() {
           body: formData,
         })
 
-        const result = await safeJsonParse(response)
+        const result = await handleResponse(response)
 
         if (!response.ok || !result.success) {
-          if (result.error === "Invalid server response") {
-            throw new Error("Upload failed: Invalid server response.")
-          }
           throw new Error(result.error || "Upload failed")
         }
 
@@ -195,12 +189,9 @@ function VideoGenerator() {
         }),
       })
 
-      const result = await safeJsonParse(response)
+      const result = await handleResponse(response)
 
       if (!response.ok) {
-        if (result.error === "Invalid server response") {
-          throw new Error("Script generation failed: Invalid server response.")
-        }
         throw new Error(result.error || "Script generation failed")
       }
 
@@ -252,7 +243,7 @@ function VideoGenerator() {
     // Extract special features from description
     if (propertyDescription) {
       const features = propertyDescription.match(
-        /pool|garage|fireplace|deck|patio|yard|upgraded|renovated|corner lot|detached|shop/gi,
+        /pool|garage|fireplace|deck|patio|yard|upgraded|renovated|corner lot|detached|shop/gi
       )
       if (features && features.length > 0) {
         caps.push({
@@ -303,12 +294,10 @@ function VideoGenerator() {
     setVideoUrl(null)
     setIsVideoGenerated(false)
     setProgress(0)
-    setProgressMessage("Starting video generation...")
 
     try {
       // Step 1: Generate Rachel's voiceover
-      setProgress(10)
-      setProgressMessage("Generating Rachel's voiceover...")
+      setProgress(15)
       const audioResp = await fetch("/api/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -316,10 +305,7 @@ function VideoGenerator() {
       })
 
       if (!audioResp.ok) {
-        const errorData = await safeJsonParse(audioResp)
-        if (errorData.error === "Invalid server response") {
-          throw new Error("Audio generation failed: Invalid server response.")
-        }
+        const errorData = await handleResponse(audioResp)
         throw new Error(errorData.error || "Failed to generate Rachel's voiceover")
       }
 
@@ -327,16 +313,12 @@ function VideoGenerator() {
       const audioUrl = URL.createObjectURL(audioBlob)
       const duration = Number(audioResp.headers.get("X-Audio-Duration")) || 30
 
-      console.log(`🎤 Rachel voiceover generated: ${duration}s duration`)
-
       // Step 2: Create property feature captions
-      setProgress(20)
-      setProgressMessage("Creating property captions...")
+      setProgress(25)
       const captions = createPropertyCaptions(duration)
 
       // Step 3: Load images
-      setProgress(30)
-      setProgressMessage("Loading images...")
+      setProgress(35)
       const imgs = await Promise.all(
         successfulUploads.map(
           (up) =>
@@ -344,22 +326,16 @@ function VideoGenerator() {
               const img = new Image()
               img.crossOrigin = "anonymous"
               img.onload = () => resolve(img)
-              img.onerror = () => {
-                console.warn(`Failed to load image: ${up.blobUrl}`)
-                resolve(null)
-              }
+              img.onerror = () => resolve(null)
               img.src = up.blobUrl!
-            }),
-        ),
+            })
+        )
       ).then((results) => results.filter((img): img is HTMLImageElement => img !== null))
 
       if (imgs.length === 0) throw new Error("No images could be loaded.")
 
-      console.log(`📸 Loaded ${imgs.length} images for video`)
-
       // Step 4: Setup canvas for 9:16 aspect ratio
-      setProgress(40)
-      setProgressMessage("Setting up video canvas...")
+      setProgress(45)
       const canvas = canvasRef.current!
       const ctx = canvas.getContext("2d")!
       canvas.width = 1080
@@ -367,11 +343,10 @@ function VideoGenerator() {
 
       const audio = audioRef.current!
       audio.src = audioUrl
-      audio.muted = true // Prevent audio preview during setup
+      audio.muted = true // Do not auto-play audio preview
 
       // Step 5: Setup recording
-      setProgress(50)
-      setProgressMessage("Preparing video recording...")
+      setProgress(55)
       const stream = canvas.captureStream(30)
       let audioContext: AudioContext | null = null
 
@@ -396,11 +371,8 @@ function VideoGenerator() {
       audio.muted = false // Unmute for recording only
       await audio.play()
 
-      console.log("🎬 Recording started...")
-
       // Step 6: Render video frames with bright yellow captions
-      setProgress(60)
-      setProgressMessage("Recording video with captions...")
+      setProgress(65)
       const timePerImage = duration / imgs.length
       let frameCount = 0
       const totalFrames = duration * 30
@@ -439,24 +411,25 @@ function VideoGenerator() {
 
         ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight)
 
-        // Draw bright yellow captions with dark shadow for contrast
+        // Draw bright yellow captions - large and clear
         captions.forEach((cap) => {
           if (elapsed >= cap.startTime && elapsed <= cap.endTime) {
             ctx.font = "bold 90px Arial"
             ctx.textAlign = "center"
 
-            // Dark shadow for contrast
-            ctx.fillStyle = "#000000"
-            ctx.fillText(cap.text, canvas.width / 2 + 4, canvas.height - 296)
-
-            // Bright yellow text
+            // Bright yellow text overlayed on relevant image
             ctx.fillStyle = "#FFFF00"
-            ctx.fillText(cap.text, canvas.width / 2, canvas.height - 300)
+            ctx.strokeStyle = "#000000"
+            ctx.lineWidth = 4
+            
+            const y = canvas.height - 300 // Position over image
+            ctx.strokeText(cap.text, canvas.width / 2, y)
+            ctx.fillText(cap.text, canvas.width / 2, y)
           }
         })
 
-        const recordingProgress = 60 + (frameCount / totalFrames) * 20
-        setProgress(Math.min(recordingProgress, 80))
+        const recordingProgress = 65 + (frameCount / totalFrames) * 20
+        setProgress(Math.min(recordingProgress, 85))
         frameCount++
         requestAnimationFrame(animate)
       }
@@ -470,12 +443,9 @@ function VideoGenerator() {
           }
 
           const webmBlob = new Blob(chunks, { type: "video/webm" })
-          console.log(`🎬 Recording complete: ${webmBlob.size} bytes`)
+          setProgress(90)
 
-          setProgress(85)
-          setProgressMessage("Uploading video for processing...")
-
-          // Upload WebM for MP4 conversion with safe JSON parsing
+          // Upload WebM for MP4 conversion
           const formData = new FormData()
           formData.append("file", webmBlob, "snapsold-video.webm")
 
@@ -484,55 +454,44 @@ function VideoGenerator() {
             body: formData,
           })
 
-          const uploadResult = await safeJsonParse(webmUploadResponse)
+          const uploadResult = await handleResponse(webmUploadResponse)
 
           if (!webmUploadResponse.ok) {
-            if (uploadResult.error === "Invalid server response") {
-              throw new Error("Video upload failed: Invalid server response.")
-            }
             throw new Error(uploadResult.error || "Failed to upload video for processing")
           }
 
           const { url: webmUrl } = uploadResult
 
           setProgress(95)
-          setProgressMessage("Converting to MP4...")
 
-          // Convert to MP4 with safe JSON parsing
+          // Convert to MP4
           const mp4Response = await fetch("/api/process-video", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ webmUrl }),
           })
 
-          const processResult = await safeJsonParse(mp4Response)
+          const processResult = await handleResponse(mp4Response)
 
           if (!mp4Response.ok) {
-            if (processResult.error === "Invalid server response") {
-              throw new Error("Video processing failed: Invalid server response.")
-            }
             throw new Error(processResult.error || "Failed to process video to MP4")
           }
 
           const { mp4Url } = processResult
           if (!mp4Url) throw new Error("MP4 processing failed.")
 
-          console.log("✅ Video generation complete!")
-
           setVideoUrl(mp4Url)
           setProgress(100)
-          setProgressMessage("Video generated successfully!")
           setIsVideoGenerated(true)
           setIsGenerating(false)
 
-          // Auto-download MP4 without replacing page
+          // Auto-download MP4
           triggerDownload(mp4Url, "snapsold-property-video.mp4")
         } catch (err) {
           console.error("Video processing error:", err)
           setError(err instanceof Error ? err.message : "Something went wrong. Please try again.")
           setIsGenerating(false)
           setProgress(0)
-          setProgressMessage("")
         }
       }
     } catch (err) {
@@ -540,7 +499,6 @@ function VideoGenerator() {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.")
       setIsGenerating(false)
       setProgress(0)
-      setProgressMessage("")
     }
   }
 
@@ -548,7 +506,6 @@ function VideoGenerator() {
     setVideoUrl(null)
     setIsVideoGenerated(false)
     setProgress(0)
-    setProgressMessage("")
     setError(null)
   }
 
@@ -580,7 +537,7 @@ function VideoGenerator() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   disabled={isGenerating}
-                  placeholder="38261 Main St, City, State 12345"
+                  placeholder="2703 Main St, City, State 12345"
                 />
               </div>
               <div>
@@ -783,11 +740,11 @@ function VideoGenerator() {
               />
             </div>
 
-            {/* Progress Bar with Message */}
+            {/* Progress Bar - Only show percent complete */}
             {isGenerating && (
               <div className="space-y-2">
                 <Progress value={progress} className="w-full h-3" />
-                <p className="text-center text-sm text-gray-600">{progressMessage}</p>
+                <p className="text-center text-sm text-gray-600">Generating... {Math.round(progress)}%</p>
               </div>
             )}
 
@@ -823,7 +780,7 @@ function VideoGenerator() {
                 ) : (
                   <>
                     <Play className="mr-2 h-5 w-5" />
-                    Generate Video with Rachel's Voice
+                    Generate Video
                   </>
                 )}
               </Button>

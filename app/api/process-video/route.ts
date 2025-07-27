@@ -4,20 +4,22 @@ import { put } from "@vercel/blob"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
+// Configure body parser for large files
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "100mb",
+    },
+  },
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { webmUrl } = await request.json()
 
     if (!webmUrl) {
-      return NextResponse.json(
-        {
-          error: "No video URL provided",
-        },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: "No video URL provided" }, { status: 400 })
     }
-
-    console.log("🎬 Processing video for MP4 export...")
 
     // Fetch the WebM video
     const videoResponse = await fetch(webmUrl)
@@ -25,12 +27,9 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to fetch video: ${videoResponse.status}`)
     }
 
-    const videoArrayBuffer = await videoResponse.arrayBuffer()
-    const videoBuffer = new Uint8Array(videoArrayBuffer)
+    const videoBuffer = Buffer.from(await videoResponse.arrayBuffer())
 
-    console.log(`📹 Video fetched: ${videoBuffer.length} bytes`)
-
-    // Upload as MP4 with proper content-length and headers
+    // Upload as MP4 with proper content-length
     const timestamp = Date.now()
     const filename = `snapsold-video-${timestamp}.mp4`
 
@@ -39,8 +38,6 @@ export async function POST(request: NextRequest) {
       contentType: "video/mp4", // Set as MP4 for better compatibility
       addRandomSuffix: false,
     })
-
-    console.log(`✅ Video processed as MP4: ${processedBlob.url}`)
 
     return NextResponse.json({
       success: true,
@@ -54,30 +51,17 @@ export async function POST(request: NextRequest) {
 
     // Always return valid JSON
     if (error instanceof Error) {
-      if (error.message.includes("413") || error.message.includes("too large") || error.message.includes("Too Large")) {
+      if (error.message.includes("413") || error.message.includes("too large")) {
         return NextResponse.json(
-          {
-            error: "Video file too large for processing. Please try a shorter video.",
-          },
-          { status: 413 },
-        )
-      }
-      if (error.message.includes("timeout")) {
-        return NextResponse.json(
-          {
-            error: "Video processing timeout. Please try again.",
-          },
-          { status: 408 },
+          { error: "Video file too large for processing." },
+          { status: 413 }
         )
       }
     }
 
     return NextResponse.json(
-      {
-        error: "Video processing failed. Please try again.",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
+      { error: "Video processing failed. Please try again." },
+      { status: 500 }
     )
   }
 }

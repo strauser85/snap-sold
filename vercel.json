@@ -2,7 +2,7 @@
   "functions": {
     "app/api/upload-image/route.ts": {
       "maxDuration": 30,
-      "memory": 512
+      "memory": 1024
     },
     "app/api/upload-video/route.ts": {
       "maxDuration": 60,
