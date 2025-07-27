@@ -3,6 +3,8 @@ import { type NextRequest, NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
+const RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM" // Rachel voice - LOCKED
+
 export async function POST(request: NextRequest) {
   try {
     const { script } = await request.json()
@@ -15,9 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ElevenLabs API key not configured" }, { status: 500 })
     }
 
-    // Rachel voice ID (locked)
-    const RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-
+    // Generate audio using Rachel's voice
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${RACHEL_VOICE_ID}`, {
       method: "POST",
       headers: {
@@ -30,8 +30,8 @@ export async function POST(request: NextRequest) {
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.0,
+          similarity_boost: 0.8,
+          style: 0.2,
           use_speaker_boost: true,
         },
       }),
@@ -39,20 +39,24 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("ElevenLabs API error:", response.status, errorText)
+      console.error("ElevenLabs API error:", errorText)
       return NextResponse.json({ error: "Failed to generate audio" }, { status: 500 })
     }
 
     const audioBuffer = await response.arrayBuffer()
 
+    // Estimate duration (rough calculation: ~150 words per minute)
+    const wordCount = script.split(" ").length
+    const estimatedDuration = Math.max(10, Math.round((wordCount / 150) * 60))
+
     return new NextResponse(audioBuffer, {
       headers: {
         "Content-Type": "audio/mpeg",
-        "Content-Length": audioBuffer.byteLength.toString(),
+        "X-Audio-Duration": estimatedDuration.toString(),
       },
     })
   } catch (error) {
     console.error("Audio generation error:", error)
-    return NextResponse.json({ error: "Failed to generate audio" }, { status: 500 })
+    return NextResponse.json({ error: "Audio generation failed" }, { status: 500 })
   }
 }
