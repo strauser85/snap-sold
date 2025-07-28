@@ -10,7 +10,27 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-
+function normalizeAddressText(text: string): string {
+  return text
+    .replace(/\bDr\.?\b/gi, "Drive")
+    .replace(/\bSt\.?\b/gi, "Street")
+    .replace(/\bAve\.?\b/gi, "Avenue")
+    .replace(/\bRd\.?\b/gi, "Road")
+    .replace(/\bBlvd\.?\b/gi, "Boulevard")
+    .replace(/\bLn\.?\b/gi, "Lane")
+    .replace(/\bHwy\.?\b/gi, "Highway")
+    .replace(/\bCt\.?\b/gi, "Court")
+    .replace(/\bPl\.?\b/gi, "Place")
+    .replace(/\bDr\b/gi, "Drive")
+    .replace(/\bSt\b/gi, "Street")
+    .replace(/\bAve\b/gi, "Avenue")
+    .replace(/\bRd\b/gi, "Road")
+    .replace(/\bBlvd\b/gi, "Boulevard")
+    .replace(/\bLn\b/gi, "Lane")
+    .replace(/\bHwy\b/gi, "Highway")
+    .replace(/\bCt\b/gi, "Court")
+    .replace(/\bPl\b/gi, "Place");
+}
 interface UploadedImage {
   id: string
   file: File
@@ -263,20 +283,30 @@ function VideoGenerator() {
     }))
   }
 
-  const triggerDownload = (url: string, filename: string) => {
-    try {
-      const a = document.createElement("a")
-      a.href = url
-      a.download = filename
-      a.style.display = "none"
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-    } catch (error) {
-      console.error("Download failed:", error)
-      setError("Download failed. Please try again.")
-    }
+function triggerDownload(url: string, filename: string) {
+  try {
+    fetch(url)
+      .then((res) => res.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = blobUrl
+        a.download = filename
+        a.style.display = "none"
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(blobUrl)
+      })
+      .catch((error) => {
+        console.error("Download failed:", error)
+        setError("Download failed. Please try again.")
+      })
+  } catch (error) {
+    console.error("Download failed:", error)
+    setError("Download failed. Please try again.")
   }
+}
 
   const generateVideo = async () => {
     const successfulUploads = uploadedImages.filter((i) => i.status === "success" && i.blobUrl)
@@ -298,11 +328,12 @@ function VideoGenerator() {
     try {
       // Step 1: Generate Rachel's voiceover
       setProgress(15)
-      const audioResp = await fetch("/api/generate-audio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script: generatedScript }),
-      })
+const normalizedScript = normalizeAddressText(generatedScript)
+const audioResp = await fetch("/api/generate-audio", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ script: normalizedScript }),
+})
 
       if (!audioResp.ok) {
         const errorData = await handleResponse(audioResp)
@@ -812,3 +843,4 @@ function VideoGenerator() {
 export default function Home() {
   return <VideoGenerator />
 }
+
