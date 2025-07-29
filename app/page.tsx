@@ -10,6 +10,33 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { createClient } from "@supabase/supabase-js"; // <== ADD THIS
+
+const uploadImagesToSupabase = async (files: File[]): Promise<string[]> => {
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+  const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const uploadedUrls: string[] = [];
+
+  for (const file of files) {
+    const fileExt = file.name.split(".").pop();
+    const filePath = `${Date.now()}-${file.name}`;
+
+    const { data, error } = await supabase.storage
+      .from("images") // 🔥 Ensure you created a bucket called "images"
+      .upload(filePath, file);
+
+    if (error) {
+      console.error("Supabase upload error:", error);
+    } else {
+      const url = `${SUPABASE_URL}/storage/v1/object/public/images/${filePath}`;
+      uploadedUrls.push(url);
+    }
+  }
+
+  return uploadedUrls;
+};
 function normalizeAddressText(text: string): string {
   return text
     .replace(/\bDr\.?\b/gi, "Drive")
@@ -91,12 +118,15 @@ function VideoGenerator() {
     const files = Array.from(e.target.files || []).slice(0, MAX_IMAGES - uploadedImages.length)
     if (files.length === 0) return
 
-    const newImages: UploadedImage[] = files.map((file) => ({
-      id: `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-      file,
-      previewUrl: URL.createObjectURL(file),
-      status: "pending",
-    }))
+    const supabaseUrls = await uploadImagesToSupabase(files);
+
+const newImages: UploadedImage[] = files.map((file, index) => ({
+  id: `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+  file,
+  previewUrl: supabaseUrls[index],
+  blobUrl: supabaseUrls[index], // optional, if you're using blobUrl elsewhere
+  status: "pending",
+}));
 
     setUploadedImages((prev) => [...prev, ...newImages])
 
