@@ -843,4 +843,4 @@ const audioResp = await fetch("/api/generate-audio", {
 export default function Home() {
   return <VideoGenerator />
 }
-
+// Forced update for Vercel redeploy
